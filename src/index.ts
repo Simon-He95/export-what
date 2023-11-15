@@ -14,14 +14,23 @@ export function activate(context: ExtensionContext) {
   const REQUIRE_REG = /require\(["']([^"']*)["']\)/
 
   context.subscriptions.push(vscode.languages.registerHoverProvider('*', {
-    async provideHover(_document, position) {
+    async provideHover(_, position) {
       const lineText = getLineText(position.line)
+      const character = position.character
       if (!IMPORT_REG.test(lineText) && !REQUIRE_REG.test(lineText))
         return
+
+      const importMatch = lineText.match(IMPORT_REG)
+      // 判断是否是hover到了路径才触发提示
+      if (importMatch) {
+        const start = lineText.indexOf(importMatch.input!) + importMatch.input!.indexOf(importMatch[2]) - 1
+        const end = start + importMatch[2].length + 1
+        if ((character < start) || (character > end))
+          return
+      }
       const workspace = vscode.workspace.workspaceFolders![0].uri.path
       const node_modules = path.resolve(workspace, '.', 'node_modules')
 
-      const importMatch = lineText.match(IMPORT_REG)
       if (importMatch) {
         let dep = importMatch[2]
         if (cache.has(dep)) {
@@ -128,7 +137,6 @@ export function activate(context: ExtensionContext) {
     if (!IMPORT_REG.test(lineText) && !REQUIRE_REG.test(lineText))
       return
     const importMatch = lineText.match(IMPORT_REG)
-
     if (importMatch) {
       let dep = importMatch[2]
       if (cache.has(dep)) {
@@ -260,12 +268,17 @@ export function activate(context: ExtensionContext) {
       if (_default)
         has.push(_default)
     }
+    else {
+      const _default = currentModule.replace(/[,\s]/g, '')
+      if (_default)
+        has.push(_default)
+    }
 
     const { character, lineText } = getSelection()!
     let set_exports_snippet = (v: string) => ` ${v}$1`
     let show_default = true
     if (match) {
-      const start = lineText.indexOf(currentModule) + match.index! + match.indexOf(match[1])
+      const start = lineText.indexOf(currentModule) + match.input!.indexOf(match[1])
       const end = start + match[0].length - 1
       if ((character < start) || (character > end)) {
         // 说明在 {}外
@@ -277,7 +290,7 @@ export function activate(context: ExtensionContext) {
         while (lineText[pos] === ' ' && pos > start)
           pos--
 
-        if (lineText[pos] !== ',')
+        if (lineText[pos] !== ' ' && lineText[pos] !== ',')
           set_exports_snippet = (v: string) => `, ${v}$1`
         else if (pos !== character - 1)
           set_exports_snippet = (v: string) => `${v}$1`
