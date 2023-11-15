@@ -4,6 +4,8 @@
 <p align="center"> English | <a href="./README_zh.md">简体中文</a></p>
 
 
+![demo](/assets/demo.gif)
+
 ## :coffee:
 
 [buy me a cup of coffee](https://github.com/Simon-He95/sponsor)
