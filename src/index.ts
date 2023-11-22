@@ -336,6 +336,7 @@ const TREE_MODULE_REG = /export\s+\*\s+from\s+["']([^'"]*)["']/g
 export function getContentExport(content: string, workspace: string): { export_default: string[]; exports: string[] } {
   const exports = []
   const export_default = []
+
   for (const match of content.matchAll(EXPORT_REG))
     exports.push(match[1])
 
@@ -344,8 +345,11 @@ export function getContentExport(content: string, workspace: string): { export_d
 
   for (const match of content.matchAll(EXPORT_MULTIPLE_REG)) {
     const items = match[1].trim().split(',')
+
     exports.push(...items.map((i) => {
       i = i.trim().replace(/\s+/g, ' ')
+      if (i.startsWith('//'))
+        return false
       const asMatch = i.match(/ as\s+(.*)/)
       if (asMatch) {
         const asValue = asMatch[1].trim()
