@@ -99,9 +99,13 @@ export function activate(context: ExtensionContext) {
         }
         else {
           // node_modules
-          const moduleFolder = path.resolve(node_modules, '.', dep)
+          let moduleFolder = path.resolve(node_modules, '.', dep)
           if (moduleFolder) {
-            const url = path.resolve(moduleFolder, '.', 'package.json')
+            let url = path.resolve(moduleFolder, '.', 'package.json')
+            if (!fs.existsSync(url)) {
+              moduleFolder = path.resolve(node_modules, '@types', dep)
+              url = path.resolve(moduleFolder, '.', 'package.json')
+            }
             const pkg = JSON.parse(await fs.promises.readFile(url, 'utf-8'))
             const main = pkg.types || pkg.module || pkg.main
             if (main) {
@@ -264,7 +268,9 @@ export function activate(context: ExtensionContext) {
     Class: 6,
     Function: 2,
     Interface: 7,
+    Struct: 21,
   }
+
   function getCompletion(exportData: { export_default: string[][]; exports: string[][] }, currentModule: string) {
     const { export_default, exports } = exportData
     const match = currentModule.match(/{([^}]*)}/)
@@ -340,10 +346,28 @@ const EXPORT_MULTIPLE_REG = /export\s+{([^}]*)}/g
 const EXPORT_DEFAULT_FUNCTION_REG = /export\s+default\s+function\s+([\w_]+)\s*\([^\)]*\)/g
 const EXPORT_DEFAULT_REG = /export\s+default\s+([\w_]+)[;\s]?$/g
 const TREE_MODULE_REG = /export\s+\*\s+from\s+["']([^'"]*)["']/g
-
+const NAMESPACE_REG = /export namespace\s+([^\s]+)/g
+const EXPORTSINGLE_REG = /export (type|function|interface|class|enum)\s+([\w_]+)\s*/g
+const typeMap: Record<string, string> = {
+  type: 'TypeParameter',
+  interface: 'Interface',
+  function: 'Function',
+  class: 'Class',
+  enum: 'Enum',
+}
 export function getContentExport(content: string, workspace: string): { export_default: string[][]; exports: string[][] } {
   const exports = []
   const export_default = []
+  // 过滤掉export namespace下的内容
+  content = content
+    .replace(/(\/\*\*[^*]*\*+(?:[^/*][^*]*\*+)*\/)|(\/\/.*$)|(\/\*[\s\S]*?\*\/)/gm, '')
+    .replace(/export namespace[^{]+{(.*)}\n/gs, (all, v) => all.replace(v, ''))
+
+  for (const match of content.matchAll(NAMESPACE_REG))
+    exports.push([match[1], 'Struct'])
+
+  for (const match of content.matchAll(EXPORTSINGLE_REG))
+    exports.push([match[2], typeMap[match[1]]])
 
   for (const match of content.matchAll(EXPORT_REG))
     exports.push([match[1], getType(content, match[1])])
@@ -356,8 +380,6 @@ export function getContentExport(content: string, workspace: string): { export_d
     // 判断大写命名的是类型(type) or 类(class)
     exports.push(...items.map((i: string) => {
       i = i.trim().replace(/\s+/g, ' ')
-      if (i.startsWith('//'))
-        return false
       const asMatch = i.match(/ as\s+(.*)/)
       if (asMatch) {
         const asValue = asMatch[1].trim()
