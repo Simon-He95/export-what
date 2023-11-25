@@ -103,7 +103,7 @@ export function activate(context: ExtensionContext) {
           if (moduleFolder) {
             const url = path.resolve(moduleFolder, '.', 'package.json')
             const pkg = JSON.parse(await fs.promises.readFile(url, 'utf-8'))
-            const main = pkg.module || pkg.main
+            const main = pkg.types || pkg.module || pkg.main
             if (main) {
               const url = path.resolve(moduleFolder, '.', main)
               const content = await fs.promises.readFile(url, 'utf-8')
@@ -236,7 +236,7 @@ export function activate(context: ExtensionContext) {
     }
   }, [' ', ',']))
 
-  function getHoverMd(exportData: { export_default: string[]; exports: string[] }) {
+  function getHoverMd(exportData: { export_default: string[][]; exports: string[][] }) {
     const { export_default, exports } = exportData
 
     const md = new vscode.MarkdownString()
@@ -245,12 +245,12 @@ export function activate(context: ExtensionContext) {
     const blocks = []
     if (export_default.length) {
       blocks.push('## Export Default')
-      blocks.push(...export_default.map(i => `- ${i}`))
+      blocks.push(...export_default.map(([i, type]) => `- \`${i}\` -> \`${type}\``))
     }
 
     if (exports.length) {
       blocks.push('## Export')
-      blocks.push(...exports.map(i => `- ${i}`))
+      blocks.push(...exports.map(([i, type]) => `- \`${i}\` -> \`${type}\``))
     }
 
     md.appendMarkdown(blocks.join('\n\n'))
@@ -258,7 +258,14 @@ export function activate(context: ExtensionContext) {
       return new vscode.Hover(md)
   }
 
-  function getCompletion(exportData: { export_default: string[]; exports: string[] }, currentModule: string) {
+  const typeCode: Record<string, number> = {
+    TypeParameter: 24,
+    Enum: 12,
+    Class: 6,
+    Function: 2,
+    Interface: 7,
+  }
+  function getCompletion(exportData: { export_default: string[][]; exports: string[][] }, currentModule: string) {
     const { export_default, exports } = exportData
     const match = currentModule.match(/{([^}]*)}/)
     let has: string[] = []
@@ -314,10 +321,11 @@ export function activate(context: ExtensionContext) {
           set_exports_snippet = (v: string) => ` { ${v}$1 }`
       }
     }
+
     return [
-      ...exports.filter(item => !has.includes(item)).map(item => createCompletionItem({ content: `Export: ${item}`, snippet: set_exports_snippet(item), type: 8 })),
+      ...exports.filter(item => !has.includes(item[0])).map(([item, type]) => createCompletionItem({ content: `Export: ${item}  ->  ${type}`, snippet: set_exports_snippet(item), type: typeCode[type] ?? 8 })),
       ...show_default
-        ? export_default.filter(item => !has.includes(item)).map(item => createCompletionItem({ content: `Export Default: ${item}`, snippet: item, type: 5 }))
+        ? export_default.filter(item => !has.includes(item[0])).map(([item, type]) => createCompletionItem({ content: `Export Default: ${item}  ->  ${type}`, snippet: item, type: typeCode[type] ?? 5 }))
         : [],
     ]
   }
@@ -333,20 +341,20 @@ const EXPORT_DEFAULT_FUNCTION_REG = /export\s+default\s+function\s+([\w_]+)\s*\(
 const EXPORT_DEFAULT_REG = /export\s+default\s+([\w_]+)[;\s]?$/g
 const TREE_MODULE_REG = /export\s+\*\s+from\s+["']([^'"]*)["']/g
 
-export function getContentExport(content: string, workspace: string): { export_default: string[]; exports: string[] } {
+export function getContentExport(content: string, workspace: string): { export_default: string[][]; exports: string[][] } {
   const exports = []
   const export_default = []
 
   for (const match of content.matchAll(EXPORT_REG))
-    exports.push(match[1])
+    exports.push([match[1], getType(content, match[1])])
 
   for (const match of content.matchAll(EXPORT_DEFAULT_FUNCTION_REG))
-    export_default.push(match[1])
+    export_default.push([match[1], getType(content, match[1])])
 
   for (const match of content.matchAll(EXPORT_MULTIPLE_REG)) {
-    const items = match[1].trim().split(',')
-
-    exports.push(...items.map((i) => {
+    const items: any = match[1].trim().split(',')
+    // 判断大写命名的是类型(type) or 类(class)
+    exports.push(...items.map((i: string) => {
       i = i.trim().replace(/\s+/g, ' ')
       if (i.startsWith('//'))
         return false
@@ -354,17 +362,20 @@ export function getContentExport(content: string, workspace: string): { export_d
       if (asMatch) {
         const asValue = asMatch[1].trim()
         if (asValue === 'default') {
-          export_default.push(asValue)
+          export_default.push([asValue, getType(content, asValue)])
           return false
         }
-        else { return asValue }
+        else {
+          return [asValue, getType(content, asValue)]
+        }
       }
-      return i.split(':')[0]
-    }).filter(Boolean) as string[])
+      const r = i.split(':')[0]
+      return [r, getType(content, r)]
+    }).filter(Boolean))
   }
 
   for (const match of content.matchAll(EXPORT_DEFAULT_REG))
-    export_default.push(match[1])
+    export_default.push([match[1], getType(content, match[1])])
 
   for (const match of content.matchAll(TREE_MODULE_REG)) {
     const tree_url = match[1]
@@ -439,4 +450,20 @@ export function findFile(url: string) {
     return target
 
   return findFile(`${url}/index`)
+}
+
+function getType(content: string, name: string) {
+  if (name[0].toLowerCase() === name[0]) {
+    const match = content.match(`${name} = \\(`) || content.match(`function ${name}`)
+    if (match)
+      return 'Function'
+    return 'Enum'
+  }
+  const typeMatch = content.match(`type ${name}`)
+  if (typeMatch)
+    return 'TypeParameter'
+  const interfaceMatch = content.match(`interface ${name}`)
+  if (interfaceMatch)
+    return 'Interface'
+  return 'Class'
 }
