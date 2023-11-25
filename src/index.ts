@@ -28,110 +28,10 @@ export function activate(context: ExtensionContext) {
         if ((character < start) || (character > end))
           return
       }
-      const workspace = vscode.workspace.workspaceFolders![0].uri.path
-      const node_modules = path.resolve(workspace, '.', 'node_modules')
 
-      if (importMatch) {
-        let dep = importMatch[2]
-        if (cache.has(dep)) {
-          const url = cache.get(dep)
-          if (!url)
-            return
-          const content = await fs.promises.readFile(url, 'utf-8')
-          return getHoverMd(getContentExport(content, url))
-        }
-        if (/^(\.|\/|\@\/)/.test(dep)) {
-          // relative
-          if (dep.startsWith('@')) {
-            const url = path.resolve(workspace, 'jsconfig.json')
-            const jsconfig = fs.existsSync(url)
-            if (jsconfig) {
-              const config = useJSONParse(await fs.promises.readFile(url, 'utf-8'))
-              const paths = config?.compilerOptions?.paths
-              if (paths) {
-                for (const key in paths) {
-                  let value = paths[key]
-                  if (key.startsWith('@')) {
-                    if (Array.isArray(value))
-                      value = value[0]
-                    value = value.replaceAll('/**', '').replaceAll('/*', '')
-                    dep = dep.replace('@', path.resolve(workspace, '.', value))
-                    break
-                  }
-                }
-              }
-            }
-            else {
-              const url = path.resolve(workspace, 'tsconfig.json')
-              const tsconfig = fs.existsSync(url)
-              if (tsconfig) {
-                const config = useJSONParse(await fs.promises.readFile(url, 'utf-8'))
-                const paths = config?.compilerOptions?.paths
-                if (paths) {
-                  for (const key in paths) {
-                    let value = paths[key]
-                    if (key.startsWith('@')) {
-                      if (Array.isArray(value))
-                        value = value[0]
-                      value = value.replaceAll('/**', '').replaceAll('/*', '')
-                      dep = dep.replace('@', path.resolve(workspace, '.', value))
-                      break
-                    }
-                  }
-                }
-              }
-            }
-
-            // 没办法处理@，默认使用根目录
-            dep = dep.replace('@', workspace)
-          }
-
-          const currentFile = getCurrentFileUrl()
-          const url = path.resolve(currentFile, '..', dep)
-          const target = findFile(url)
-          if (target) {
-            const content = await fs.promises.readFile(target, 'utf-8')
-            cache.set(importMatch[2], target)
-            return getHoverMd(getContentExport(content, target))
-          }
-
-          cache.set(importMatch[2], null)
-        }
-        else {
-          // node_modules
-          let moduleFolder = path.resolve(node_modules, '.', dep)
-          if (moduleFolder) {
-            let url = path.resolve(moduleFolder, '.', 'package.json')
-            if (!fs.existsSync(url)) {
-              moduleFolder = path.resolve(node_modules, '@types', dep)
-              url = path.resolve(moduleFolder, '.', 'package.json')
-            }
-            const pkg = JSON.parse(await fs.promises.readFile(url, 'utf-8'))
-            const main = pkg.types || pkg.module || pkg.main
-            if (main) {
-              const url = path.resolve(moduleFolder, '.', main)
-              const content = await fs.promises.readFile(url, 'utf-8')
-              cache.set(importMatch[2], url)
-
-              return getHoverMd(getContentExport(content, url))
-            }
-          }
-          cache.set(importMatch[2], null)
-        }
-      }
-      else {
-        // todo: not plan support require
-        const requireMatch = lineText.match(REQUIRE_REG)!
-        const dep = requireMatch[1]
-        if (/^[\.\/]/.test(dep)) {
-          // relative
-          const currentFile = getCurrentFileUrl()
-          const url = path.resolve(currentFile, '..', dep)
-        }
-        else {
-          // node_modules
-        }
-      }
+      const data = await getContent(importMatch, lineText)
+      if (data)
+        return getHoverMd(data)
     },
   }))
 
@@ -141,103 +41,11 @@ export function activate(context: ExtensionContext) {
     if (!IMPORT_REG.test(lineText) && !REQUIRE_REG.test(lineText))
       return
     const importMatch = lineText.match(IMPORT_REG)
-    if (importMatch) {
-      let dep = importMatch[2]
-      if (cache.has(dep)) {
-        const url = cache.get(dep)
-        if (!url)
-          return
-        const content = await fs.promises.readFile(url, 'utf-8')
-        return getCompletion(getContentExport(content, url), importMatch[1])
-      }
-      const workspace = vscode.workspace.workspaceFolders![0].uri.path
-      if (LOCAL_URL_REG.test(dep)) {
-        // relative
-        if (dep.startsWith('@')) {
-          const url = path.resolve(workspace, 'jsconfig.json')
-          const jsconfig = fs.existsSync(url)
-          if (jsconfig) {
-            const config = useJSONParse(await fs.promises.readFile(url, 'utf-8'))
-            const paths = config?.compilerOptions?.paths
-            if (paths) {
-              for (const key in paths) {
-                let value = paths[key]
-                if (key.startsWith('@')) {
-                  if (Array.isArray(value))
-                    value = value[0]
-                  value = value.replaceAll('/**', '').replaceAll('/*', '')
-                  dep = dep.replace('@', path.resolve(workspace, '.', value))
-                  break
-                }
-              }
-            }
-          }
-          else {
-            const url = path.resolve(workspace, 'tsconfig.json')
-            const tsconfig = fs.existsSync(url)
-            if (tsconfig) {
-              const config = useJSONParse(await fs.promises.readFile(url, 'utf-8'))
-              const paths = config?.compilerOptions?.paths
-              if (paths) {
-                for (const key in paths) {
-                  let value = paths[key]
-                  if (key.startsWith('@')) {
-                    if (Array.isArray(value))
-                      value = value[0]
-                    value = value.replaceAll('/**', '').replaceAll('/*', '')
-                    dep = dep.replace('@', path.resolve(workspace, '.', value))
-                    break
-                  }
-                }
-              }
-            }
-          }
 
-          // 没办法处理@，默认使用根目录
-          dep = dep.replace('@', workspace)
-        }
+    const data = await getContent(importMatch, lineText)
 
-        const currentFile = getCurrentFileUrl()
-        const url = path.resolve(currentFile, '..', dep)
-        const target = findFile(url)
-        if (target) {
-          const content = await fs.promises.readFile(target, 'utf-8')
-          cache.set(importMatch[2], target)
-          return getCompletion(getContentExport(content, target), importMatch[1])
-        }
-        cache.set(importMatch[2], null)
-      }
-      else {
-        // node_modules
-        const node_modules = path.resolve(workspace, '.', 'node_modules')
-        const moduleFolder = path.resolve(node_modules, '.', dep)
-        if (moduleFolder) {
-          const url = path.resolve(moduleFolder, '.', 'package.json')
-          const pkg = JSON.parse(await fs.promises.readFile(url, 'utf-8'))
-          const main = pkg.module || pkg.main
-          if (main) {
-            const url = path.resolve(moduleFolder, '.', main)
-            const content = await fs.promises.readFile(url, 'utf-8')
-            cache.set(importMatch[2], url)
-            return getCompletion(getContentExport(content, url), importMatch[1])
-          }
-        }
-        cache.set(importMatch[2], null)
-      }
-    }
-    else {
-      // todo
-      const requireMatch = lineText.match(REQUIRE_REG)!
-      const dep = requireMatch[1]
-      if (LOCAL_URL_REG.test(dep)) {
-        // relative
-        const currentFile = getCurrentFileUrl()
-        const url = path.resolve(currentFile, '..', dep)
-      }
-      else {
-        // node_modules
-      }
-    }
+    if (data)
+      return getCompletion(data, importMatch![1])
   }, [' ', ',']))
 
   function getHoverMd(exportData: { export_default: string[][]; exports: string[][] }) {
@@ -269,11 +77,13 @@ export function activate(context: ExtensionContext) {
     Function: 2,
     Interface: 7,
     Struct: 21,
+    Variable: 5,
   }
 
   function getCompletion(exportData: { export_default: string[][]; exports: string[][] }, currentModule: string) {
     const { export_default, exports } = exportData
     const match = currentModule.match(/{([^}]*)}/)
+    const isTypeOnly = currentModule.startsWith('type')
     let has: string[] = []
     if (match) {
       has = match[1].replace(/\s/g, '').split(',').filter(Boolean)
@@ -329,9 +139,21 @@ export function activate(context: ExtensionContext) {
     }
 
     return [
-      ...exports.filter(item => !has.includes(item[0])).map(([item, type]) => createCompletionItem({ content: `Export: ${item}  ->  ${type}`, snippet: set_exports_snippet(item), type: typeCode[type] ?? 8 })),
+      ...exports.filter(([item, type]) => {
+        if (has.includes(item))
+          return false
+        if (isTypeOnly && !['Type', 'Interface', 'Enum'].includes(type))
+          return false
+        return true
+      }).map(([item, type]) => createCompletionItem({ content: `Export: ${item}  ->  ${type}`, snippet: set_exports_snippet(item), type: typeCode[type] ?? 8 })),
       ...show_default
-        ? export_default.filter(item => !has.includes(item[0])).map(([item, type]) => createCompletionItem({ content: `Export Default: ${item}  ->  ${type}`, snippet: item, type: typeCode[type] ?? 5 }))
+        ? export_default.filter(([item, type]) => {
+          if (has.includes(item))
+            return false
+          if (isTypeOnly && !['Type', 'Interface', 'Enum'].includes(type))
+            return false
+          return true
+        }).map(([item, type]) => createCompletionItem({ content: `Export Default: ${item}  ->  ${type}`, snippet: item, type: typeCode[type] ?? 5 }))
         : [],
     ]
   }
@@ -429,7 +251,7 @@ export function getContentExport(content: string, workspace: string): { export_d
       if (moduleFolder) {
         const url = path.resolve(moduleFolder, '.', 'package.json')
         const pkg = JSON.parse(fs.readFileSync(url, 'utf-8'))
-        const main = pkg.module || pkg.main
+        const main = pkg.types || pkg.module || pkg.main
         if (main) {
           const url = path.resolve(moduleFolder, '.', main)
           const tree_content = fs.readFileSync(url, 'utf-8')
@@ -479,7 +301,7 @@ function getType(content: string, name: string) {
     const match = content.match(`${name} = \\(`) || content.match(`function ${name}`)
     if (match)
       return 'Function'
-    return 'Enum'
+    return 'Varibale'
   }
   const typeMatch = content.match(`type ${name}`)
   if (typeMatch)
@@ -487,5 +309,116 @@ function getType(content: string, name: string) {
   const interfaceMatch = content.match(`interface ${name}`)
   if (interfaceMatch)
     return 'Interface'
+  const enumMatch = content.match(`enum ${name}`)
+  if (enumMatch)
+    return 'Enum'
   return 'Class'
+}
+
+const REQUIRE_REG = /require\(["']([^"']*)["']\)/
+
+async function getContent(importMatch: any, lineText: string) {
+  const workspace = vscode.workspace.workspaceFolders![0].uri.path
+  const node_modules = path.resolve(workspace, '.', 'node_modules')
+  if (importMatch) {
+    let dep = importMatch[2]
+    if (cache.has(dep)) {
+      const url = cache.get(dep)
+      if (!url)
+        return
+      const content = await fs.promises.readFile(url, 'utf-8')
+      return getContentExport(content, url)
+    }
+    if (/^(\.|\/|\@\/)/.test(dep)) {
+      // relative
+      if (dep.startsWith('@')) {
+        const url = path.resolve(workspace, 'jsconfig.json')
+        const jsconfig = fs.existsSync(url)
+        if (jsconfig) {
+          const config = useJSONParse(await fs.promises.readFile(url, 'utf-8'))
+          const paths = config?.compilerOptions?.paths
+          if (paths) {
+            for (const key in paths) {
+              let value = paths[key]
+              if (key.startsWith('@')) {
+                if (Array.isArray(value))
+                  value = value[0]
+                value = value.replaceAll('/**', '').replaceAll('/*', '')
+                dep = dep.replace('@', path.resolve(workspace, '.', value))
+                break
+              }
+            }
+          }
+        }
+        else {
+          const url = path.resolve(workspace, 'tsconfig.json')
+          const tsconfig = fs.existsSync(url)
+          if (tsconfig) {
+            const config = useJSONParse(await fs.promises.readFile(url, 'utf-8'))
+            const paths = config?.compilerOptions?.paths
+            if (paths) {
+              for (const key in paths) {
+                let value = paths[key]
+                if (key.startsWith('@')) {
+                  if (Array.isArray(value))
+                    value = value[0]
+                  value = value.replaceAll('/**', '').replaceAll('/*', '')
+                  dep = dep.replace('@', path.resolve(workspace, '.', value))
+                  break
+                }
+              }
+            }
+          }
+        }
+
+        // 没办法处理@，默认使用根目录
+        dep = dep.replace('@', workspace)
+      }
+
+      const currentFile = getCurrentFileUrl()
+      const url = path.resolve(currentFile, '..', dep)
+      const target = findFile(url)
+      if (target) {
+        const content = await fs.promises.readFile(target, 'utf-8')
+        cache.set(importMatch[2], target)
+        return getContentExport(content, target)
+      }
+
+      cache.set(importMatch[2], null)
+    }
+    else {
+      // node_modules
+      let moduleFolder = path.resolve(node_modules, '.', dep)
+      if (moduleFolder) {
+        let url = path.resolve(moduleFolder, '.', 'package.json')
+        if (!fs.existsSync(url)) {
+          moduleFolder = path.resolve(node_modules, '@types', dep)
+          url = path.resolve(moduleFolder, '.', 'package.json')
+        }
+        const pkg = JSON.parse(await fs.promises.readFile(url, 'utf-8'))
+        const main = pkg.types || pkg.module || pkg.main
+        if (main) {
+          const url = path.resolve(moduleFolder, '.', main)
+          const content = await fs.promises.readFile(url, 'utf-8')
+          cache.set(importMatch[2], url)
+
+          return getContentExport(content, url)
+        }
+      }
+      cache.set(importMatch[2], null)
+    }
+  }
+  else {
+    // todo: not plan support require
+    const requireMatch = lineText.match(REQUIRE_REG)!
+    const dep = requireMatch[1]
+    if (/^[\.\/]/.test(dep)) {
+      // relative
+      const currentFile = getCurrentFileUrl()
+      const url = path.resolve(currentFile, '..', dep)
+    }
+    else {
+      // node_modules
+    }
+  }
 }
