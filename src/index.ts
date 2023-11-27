@@ -1,14 +1,10 @@
-import fs from 'node:fs'
-import path from 'node:path'
-import { createCompletionItem, getCurrentFileUrl, getLineText, getSelection, registerCompletionItemProvider } from '@vscode-use/utils'
-import { useJSONParse } from 'lazy-js-utils'
+import { createCompletionItem, getLineText, getSelection, registerCompletionItemProvider } from '@vscode-use/utils'
+import { isArray, toArray } from 'lazy-js-utils'
 import * as vscode from 'vscode'
 import type { ExtensionContext } from 'vscode'
+import type { ExportType } from './parse'
+import { getModule } from './parse'
 
-const suffix = ['.js', '.ts']
-const cache = new Map()
-
-const LOCAL_URL_REG = /^(\.|\/|\@\/)/
 export function activate(context: ExtensionContext) {
   const IMPORT_REG = /import\s*(.*)\s*from ["']([^"']*)["']/
   const REQUIRE_REG = /require\(["']([^"']*)["']\)/
@@ -29,9 +25,9 @@ export function activate(context: ExtensionContext) {
           return
       }
 
-      const data = await getContent(importMatch, lineText)
+      const data = await getModule(importMatch![2])
       if (data)
-        return getHoverMd(data)
+        return getHoverMd(data.exports)
     },
   }))
 
@@ -42,28 +38,34 @@ export function activate(context: ExtensionContext) {
       return
     const importMatch = lineText.match(IMPORT_REG)
 
-    const data = await getContent(importMatch, lineText)
+    const data = await getModule(importMatch![2])
 
     if (data)
-      return getCompletion(data, importMatch![1])
+      return getCompletion(data.exports, importMatch![1])
   }, [' ', ',']))
 
-  function getHoverMd(exportData: { export_default: string[][]; exports: string[][] }) {
-    const { export_default, exports } = exportData
-
+  function getHoverMd(exportData: ExportType[]) {
     const md = new vscode.MarkdownString()
     md.isTrusted = true
     md.supportHtml = true
-    const blocks = []
-    if (export_default.length) {
-      blocks.push('## Export Default')
-      blocks.push(...export_default.map(([i, type]) => `- \`${i}\` -> \`${type}\``))
-    }
-
-    if (exports.length) {
-      blocks.push('## Export')
-      blocks.push(...exports.map(([i, type]) => `- \`${i}\` -> \`${type}\``))
-    }
+    const blocks: string[] = []
+    let isTitle = false
+    exportData.forEach((data) => {
+      const { type, name, alias } = data
+      if (type.includes('default')) {
+        const _type = type.find(i => i !== 'default')
+        blocks.push('## Export Default')
+        blocks.push(`- \`${alias || name}\`   ->   \`${_type}\``)
+      }
+      else {
+        if (!isTitle) {
+          isTitle = true
+          blocks.push('## Export')
+        }
+        const _type = toArray(type)
+        blocks.push(`- \`${alias || name}\`   ->   \`${_type[0]}\``)
+      }
+    })
 
     md.appendMarkdown(blocks.join('\n\n'))
     if (blocks.length)
@@ -71,17 +73,18 @@ export function activate(context: ExtensionContext) {
   }
 
   const typeCode: Record<string, number> = {
-    TypeParameter: 24,
-    Enum: 12,
-    Class: 6,
-    Function: 2,
-    Interface: 7,
+    TSTypeAliasDeclaration: 24,
+    TSEnumDeclaration: 24,
+    ClassDeclaration: 6,
+    FunctionDeclaration: 2,
+    TSInterfaceDeclaration: 7,
     Struct: 21,
-    Variable: 5,
+    VariableDeclaration: 5,
+    TSFunctionType: 24,
+    TSTypeLiteral: 24,
   }
 
-  function getCompletion(exportData: { export_default: string[][]; exports: string[][] }, currentModule: string) {
-    const { export_default, exports } = exportData
+  function getCompletion(exportData: ExportType[], currentModule: string) {
     const match = currentModule.match(/{([^}]*)}/)
     const isTypeOnly = currentModule.startsWith('type')
     let has: string[] = []
@@ -139,21 +142,29 @@ export function activate(context: ExtensionContext) {
     }
 
     return [
-      ...exports.filter(([item, type]) => {
-        if (has.includes(item))
+      ...exportData.filter(({ name, type }) => {
+        if (has.includes(name))
           return false
-        if (isTypeOnly && !['Type', 'Interface', 'Enum'].includes(type))
+        if (isTypeOnly && !['TSInterfaceDeclaration', 'TSTypeAliasDeclaration', 'TSEnumDeclaration', 'TSFunctionType', 'TSTypeLiteral'].includes(type[0]))
           return false
         return true
-      }).map(([item, type]) => createCompletionItem({ content: `Export: ${item}  ->  ${type}`, snippet: set_exports_snippet(item), type: typeCode[type] ?? 8 })),
+      }).map(({ name, type, returnType }) => {
+        let _type: any = isArray(type) ? type.filter(t => t !== 'default') : [type]
+        if (_type.length > 1)
+          _type = _type.filter((t: string) => t !== 'Identifier')
+
+        _type = _type[0]
+        return createCompletionItem({ content: `Export: ${name}  ->  ${type}`, snippet: set_exports_snippet(name), type: typeCode[_type] ?? 8, detail: returnType })
+      }),
       ...show_default
-        ? export_default.filter(([item, type]) => {
-          if (has.includes(item))
-            return false
-          if (isTypeOnly && !['Type', 'Interface', 'Enum'].includes(type))
-            return false
-          return true
-        }).map(([item, type]) => createCompletionItem({ content: `Export Default: ${item}  ->  ${type}`, snippet: item, type: typeCode[type] ?? 5 }))
+        ? exportData.filter(({ type }) => type.includes('default')).map(({ name, type, returnType }) => {
+          let _type: any = isArray(type) ? type.filter(t => t !== 'default') : type
+          if (_type.length > 1)
+            _type = _type.filter((t: string) => t !== 'Identifier')
+
+          _type = _type[0]
+          return createCompletionItem({ content: `Export Default: ${name}  ->  ${type}`, snippet: name, type: typeCode[_type] ?? 5, detail: returnType })
+        })
         : [],
     ]
   }
@@ -161,264 +172,4 @@ export function activate(context: ExtensionContext) {
 
 export function deactivate() {
 
-}
-
-const EXPORT_REG = /export (?:const|let|var|function)\s+([\w_]+)\s*/g
-const EXPORT_MULTIPLE_REG = /export\s+{([^}]*)}/g
-const EXPORT_DEFAULT_FUNCTION_REG = /export\s+default\s+function\s+([\w_]+)\s*\([^\)]*\)/g
-const EXPORT_DEFAULT_REG = /export\s+default\s+([\w_]+)[;\s]?$/g
-const TREE_MODULE_REG = /export\s+\*\s+from\s+["']([^'"]*)["']/g
-const NAMESPACE_REG = /export namespace\s+([^\s]+)/g
-const EXPORTSINGLE_REG = /export (type|function|interface|class|enum)\s+([\w_]+)\s*/g
-const typeMap: Record<string, string> = {
-  type: 'TypeParameter',
-  interface: 'Interface',
-  function: 'Function',
-  class: 'Class',
-  enum: 'Enum',
-}
-export function getContentExport(content: string, workspace: string): { export_default: string[][]; exports: string[][] } {
-  const exports = []
-  const export_default = []
-  // 过滤掉export namespace下的内容
-  content = content
-    .replace(/(\/\*\*[^*]*\*+(?:[^/*][^*]*\*+)*\/)|(\/\/.*$)|(\/\*[\s\S]*?\*\/)/gm, '')
-    .replace(/export namespace[^{]+{(.*)}\n/gs, (all, v) => all.replace(v, ''))
-
-  for (const match of content.matchAll(NAMESPACE_REG))
-    exports.push([match[1], 'Struct'])
-
-  for (const match of content.matchAll(EXPORTSINGLE_REG))
-    exports.push([match[2], typeMap[match[1]]])
-
-  for (const match of content.matchAll(EXPORT_REG))
-    exports.push([match[1], getType(content, match[1])])
-
-  for (const match of content.matchAll(EXPORT_DEFAULT_FUNCTION_REG))
-    export_default.push([match[1], getType(content, match[1])])
-
-  for (const match of content.matchAll(EXPORT_MULTIPLE_REG)) {
-    const items: any = match[1].trim().split(',')
-    // 判断大写命名的是类型(type) or 类(class)
-    exports.push(...items.map((i: string) => {
-      i = i.trim().replace(/\s+/g, ' ')
-      const asMatch = i.match(/ as\s+(.*)/)
-      if (asMatch) {
-        const asValue = asMatch[1].trim()
-        if (asValue === 'default') {
-          export_default.push([asValue, getType(content, asValue)])
-          return false
-        }
-        else {
-          return [asValue, getType(content, asValue)]
-        }
-      }
-      const r = i.split(':')[0]
-      return [r, getType(content, r)]
-    }).filter(Boolean))
-  }
-
-  for (const match of content.matchAll(EXPORT_DEFAULT_REG))
-    export_default.push([match[1], getType(content, match[1])])
-
-  for (const match of content.matchAll(TREE_MODULE_REG)) {
-    const tree_url = match[1]
-    if (cache.has(tree_url)) {
-      const url = cache.get(tree_url)
-      if (!url)
-        continue
-      const tree_content = fs.readFileSync(url, 'utf-8')
-      const { exports: treeExports } = getContentExport(tree_content, url)
-      exports.push(...treeExports)
-      continue
-    }
-    // 判断是否是node_modules or 相对路径
-    if (LOCAL_URL_REG.test(tree_url)) {
-      const url = path.resolve(workspace, '..', tree_url)
-      const target = findFile(url)
-      if (target) {
-        const tree_content = fs.readFileSync(target, 'utf-8')
-        const { exports: treeExports } = getContentExport(tree_content, target)
-        exports.push(...treeExports)
-      }
-      else {
-        cache.set(tree_url, null)
-      }
-    }
-    else {
-      const node_modules = path.resolve(vscode.workspace.workspaceFolders![0].uri.path, '.', 'node_modules')
-      const moduleFolder = path.resolve(node_modules, '.', tree_url)
-      if (moduleFolder) {
-        const url = path.resolve(moduleFolder, '.', 'package.json')
-        const pkg = JSON.parse(fs.readFileSync(url, 'utf-8'))
-        const main = pkg.types || pkg.module || pkg.main
-        if (main) {
-          const url = path.resolve(moduleFolder, '.', main)
-          const tree_content = fs.readFileSync(url, 'utf-8')
-          cache.set(tree_url, url)
-          const { exports: treeExports } = getContentExport(tree_content, url)
-          exports.push(...treeExports)
-        }
-        else {
-          cache.set(tree_url, null)
-        }
-      }
-    }
-  }
-
-  return {
-    export_default,
-    exports,
-  }
-}
-
-export function isDirectory(url: string) {
-  const stats = fs.statSync(url)
-  return stats.isDirectory()
-}
-
-export function findFile(url: string) {
-  const target = null
-  for (const s of suffix) {
-    if (url.endsWith(s))
-      return url
-
-    const temp = `${url}${s}`
-    if (fs.existsSync(temp))
-      return temp
-  }
-  if (target)
-    return target
-
-  if (!isDirectory(url))
-    return target
-
-  return findFile(`${url}/index`)
-}
-
-function getType(content: string, name: string) {
-  if (name[0].toLowerCase() === name[0]) {
-    const match = content.match(`${name} = \\(`) || content.match(`function ${name}`)
-    if (match)
-      return 'Function'
-    return 'Varibale'
-  }
-  const typeMatch = content.match(`type ${name}`)
-  if (typeMatch)
-    return 'TypeParameter'
-  const interfaceMatch = content.match(`interface ${name}`)
-  if (interfaceMatch)
-    return 'Interface'
-  const enumMatch = content.match(`enum ${name}`)
-  if (enumMatch)
-    return 'Enum'
-  return 'Class'
-}
-
-const REQUIRE_REG = /require\(["']([^"']*)["']\)/
-
-async function getContent(importMatch: any, lineText: string) {
-  const workspace = vscode.workspace.workspaceFolders![0].uri.path
-  const node_modules = path.resolve(workspace, '.', 'node_modules')
-  if (importMatch) {
-    let dep = importMatch[2]
-    if (cache.has(dep)) {
-      const url = cache.get(dep)
-      if (!url)
-        return
-      const content = await fs.promises.readFile(url, 'utf-8')
-      return getContentExport(content, url)
-    }
-    if (/^(\.|\/|\@\/)/.test(dep)) {
-      // relative
-      if (dep.startsWith('@')) {
-        const url = path.resolve(workspace, 'jsconfig.json')
-        const jsconfig = fs.existsSync(url)
-        if (jsconfig) {
-          const config = useJSONParse(await fs.promises.readFile(url, 'utf-8'))
-          const paths = config?.compilerOptions?.paths
-          if (paths) {
-            for (const key in paths) {
-              let value = paths[key]
-              if (key.startsWith('@')) {
-                if (Array.isArray(value))
-                  value = value[0]
-                value = value.replaceAll('/**', '').replaceAll('/*', '')
-                dep = dep.replace('@', path.resolve(workspace, '.', value))
-                break
-              }
-            }
-          }
-        }
-        else {
-          const url = path.resolve(workspace, 'tsconfig.json')
-          const tsconfig = fs.existsSync(url)
-          if (tsconfig) {
-            const config = useJSONParse(await fs.promises.readFile(url, 'utf-8'))
-            const paths = config?.compilerOptions?.paths
-            if (paths) {
-              for (const key in paths) {
-                let value = paths[key]
-                if (key.startsWith('@')) {
-                  if (Array.isArray(value))
-                    value = value[0]
-                  value = value.replaceAll('/**', '').replaceAll('/*', '')
-                  dep = dep.replace('@', path.resolve(workspace, '.', value))
-                  break
-                }
-              }
-            }
-          }
-        }
-
-        // 没办法处理@，默认使用根目录
-        dep = dep.replace('@', workspace)
-      }
-
-      const currentFile = getCurrentFileUrl()
-      const url = path.resolve(currentFile, '..', dep)
-      const target = findFile(url)
-      if (target) {
-        const content = await fs.promises.readFile(target, 'utf-8')
-        cache.set(importMatch[2], target)
-        return getContentExport(content, target)
-      }
-
-      cache.set(importMatch[2], null)
-    }
-    else {
-      // node_modules
-      let moduleFolder = path.resolve(node_modules, '.', dep)
-      if (moduleFolder) {
-        let url = path.resolve(moduleFolder, '.', 'package.json')
-        if (!fs.existsSync(url)) {
-          moduleFolder = path.resolve(node_modules, '@types', dep)
-          url = path.resolve(moduleFolder, '.', 'package.json')
-        }
-        const pkg = JSON.parse(await fs.promises.readFile(url, 'utf-8'))
-        const main = pkg.types || pkg.module || pkg.main
-        if (main) {
-          const url = path.resolve(moduleFolder, '.', main)
-          const content = await fs.promises.readFile(url, 'utf-8')
-          cache.set(importMatch[2], url)
-
-          return getContentExport(content, url)
-        }
-      }
-      cache.set(importMatch[2], null)
-    }
-  }
-  else {
-    // todo: not plan support require
-    const requireMatch = lineText.match(REQUIRE_REG)!
-    const dep = requireMatch[1]
-    if (/^[\.\/]/.test(dep)) {
-      // relative
-      const currentFile = getCurrentFileUrl()
-      const url = path.resolve(currentFile, '..', dep)
-    }
-    else {
-      // node_modules
-    }
-  }
 }
