@@ -13,7 +13,6 @@ import {
   isImportDeclaration,
   isImportDefaultSpecifier,
   isImportSpecifier,
-  isStringLiteral,
   isTSDeclareFunction,
   isTSEnumDeclaration,
   isTSInterfaceDeclaration,
@@ -62,11 +61,12 @@ interface ScopedType {
 const urlMap = new Map()
 const codeMap = new Map()
 
-export function getModule(url: string, onlyExports = false) {
-  url = toAbsoluteUrl(url)!
-  if (!url)
+export function getModule(url: string, onlyExports = false, moduleFolder?: string) {
+  const urlInfo = toAbsoluteUrl(url, moduleFolder)!
+  if (!urlInfo)
     return
-
+  const { url: _url, moduleFolder: _moduleFolder } = urlInfo
+  url = _url
   const code = fs.readFileSync(url, 'utf-8')
   if (urlMap.has(url)) {
     const originCode = urlMap.get(url)
@@ -81,257 +81,266 @@ export function getModule(url: string, onlyExports = false) {
   let exports: ExportType[] = []
   const scoped: ScopedType[] = []
   const body = ast.program.body
-  for (const node of body) {
-    if (!onlyExports && isImportDeclaration(node)) {
-      const specifiers = node.specifiers
-      const source = node.source.value
-      imports.push(...specifiers.map((specifier) => {
-        if (isImportDefaultSpecifier(specifier)) {
-          return {
-            name: specifier.local.name,
-            type: 'default',
-            source,
-          }
-        }
-        else if (isImportSpecifier(specifier)) {
-          const alias = specifier.local.name
-          return {
-            name: (specifier.imported as any).name,
-            alias,
-            source,
-          }
-        }
-        return false
-      }).filter(Boolean) as ImportType[])
-    }
-    else if (isExportNamedDeclaration(node)) {
-      if (isFunctionDeclaration(node.declaration) || isTSDeclareFunction(node.declaration)) {
-        const name = node.declaration.id?.name || ''
 
-        const params = node.declaration.params.map(p => code.slice(p.start!, p.end!)).join(', ')
-        const returnType = node.declaration.returnType ? code.slice(node.declaration.returnType.start! + 2, node.declaration.returnType.end!) : ''
-        // 如果exports中存在同名，可能是函数的重载
-        const hasTarget = exports.find(i => i.name === name)
-        if (!hasTarget) {
-          exports.push({
-            name,
-            params,
-            returnType,
-            type: ['FunctionDeclaration'],
-          })
-        }
-        else {
-          hasTarget.params = `${hasTarget.params} | ${params}`
-          hasTarget.returnType = `${hasTarget.returnType} | ${returnType}`
-        }
-      }
-      else if (isClassDeclaration(node.declaration)) {
-        const name = node.declaration.id!.name
-        const returnType = code.slice(node.declaration.start!, node.declaration.end!)
-        exports.push({
-          name,
-          returnType,
-          type: ['ClassDeclaration'],
-        })
-      }
-      else if (isVariableDeclaration(node.declaration)) {
-        const declaration = (node as any)?.declaration?.declarations?.[0]
-        const name = declaration.id?.name
-        if (!name)
-          continue
-        const init = (node as any)?.declaration?.declarations?.[0]?.init
-        if (isStringLiteral(init)) {
-          exports.push({
-            name,
-            type: ['StringLiteral'],
-            returnType: code.slice(init.start!, init.end!),
-          })
-        }
-        else if (isIdentifier(init)) {
-          // 变量
-          exports.push({
-            name,
-            type: ['Identifier'],
-          })
-        }
-        else if (isArrowFunctionExpression(init)) {
-          const params = init.params.map(p => code.slice(p.start!, p.end!)).join(', ')
-          const returnType = init.returnType ? code.slice(init.returnType.start!, init.returnType.end!) : ''
-          exports.push({
-            name,
-            type: ['ArrowFunctionExpression'],
-            params,
-            returnType,
-          })
-        }
-        else if (init === null && declaration.id.typeAnnotation) {
-          const type = declaration.id?.typeAnnotation.typeAnnotation?.type
-          if (!type)
-            continue
-          exports.push({
-            name,
-            type,
-            returnType: code.slice(node.start!, node.end!),
-          })
-        }
-      }
-      else if (isVariableDeclarator(node.declaration)) {
-        // debugger
-      }
-      else if (isTSInterfaceDeclaration(node.declaration)) {
-        const name = node.declaration.id.name
-        const returnType = code.slice(node.declaration.start!, node.declaration.end!)
-        exports.push({
-          name,
-          returnType,
-          type: ['TSInterfaceDeclaration'],
-        })
-      }
-      else if (isTSTypeAliasDeclaration(node.declaration)) {
-        const name = node.declaration.id.name
-        const returnType = code.slice(node.declaration.start!, node.declaration.end!)
-        exports.push({
-          name,
-          returnType,
-          type: ['TSTypeAliasDeclaration'],
-        })
-      }
-      else if (isTSEnumDeclaration(node.declaration)) {
-        const name = node.declaration.id.name
-        const returnType = code.slice(node.declaration.start!, node.declaration.end!)
-        exports.push({
-          name,
-          returnType,
-          type: ['TSEnumDeclaration'],
-        })
-      }
-      else if (node.specifiers) {
-        exports.push(...node.specifiers.map((specifier) => {
-          if (isExportSpecifier(specifier)) {
-            const name = specifier.local.name
-            const alias = (specifier as any).exported?.name
+  for (const node of body) {
+    try {
+      if (!onlyExports && isImportDeclaration(node)) {
+        const specifiers = node.specifiers
+        const source = node.source.value
+        imports.push(...specifiers.map((specifier) => {
+          if (isImportDefaultSpecifier(specifier)) {
             return {
-              name,
+              name: specifier.local.name,
+              type: 'default',
+              source,
+            }
+          }
+          else if (isImportSpecifier(specifier)) {
+            const alias = specifier.local.name
+            return {
+              name: (specifier.imported as any).name,
               alias,
-              type: ['Identifier'],
+              source,
             }
           }
           return false
-        }).filter(Boolean) as ExportType[])
+        }).filter(Boolean) as ImportType[])
       }
-    }
-    else if (isExportDefaultDeclaration(node)) {
-      if (isFunctionDeclaration(node.declaration)) {
-        const name = node.declaration.id?.name || ''
-        const params = node.declaration.params.map(p => code.slice(p.start!, p.end!)).join(', ')
-        const returnType = node.declaration.returnType ? code.slice(node.declaration.returnType.start!, node.declaration.returnType.end!) : ''
-        exports.push({
-          name,
-          params,
-          returnType,
-          type: ['Function', 'default'],
-        })
+      else if (isExportNamedDeclaration(node)) {
+        if (isFunctionDeclaration(node.declaration) || isTSDeclareFunction(node.declaration)) {
+          const name = node.declaration.id?.name || ''
+
+          const params = node.declaration.params.map(p => code.slice(p.start!, p.end!)).join(', ')
+          const returnType = node.declaration.returnType ? code.slice(node.declaration.returnType.start! + 2, node.declaration.returnType.end!) : ''
+          // 如果exports中存在同名，可能是函数的重载
+          const hasTarget = exports.find(i => i.name === name)
+          if (!hasTarget) {
+            exports.push({
+              name,
+              params,
+              returnType,
+              type: ['FunctionDeclaration'],
+            })
+          }
+          else {
+            hasTarget.params = `${hasTarget.params} | ${params}`
+            hasTarget.returnType = `${hasTarget.returnType} | ${returnType}`
+          }
+        }
+        else if (isClassDeclaration(node.declaration)) {
+          const name = node.declaration.id!.name
+          const returnType = code.slice(node.declaration.start!, node.declaration.end!)
+          exports.push({
+            name,
+            returnType,
+            type: ['ClassDeclaration'],
+          })
+        }
+        else if (isVariableDeclaration(node.declaration)) {
+          const declaration = (node as any)?.declaration?.declarations?.[0]
+          const name = declaration.id?.name
+          if (!name)
+            continue
+          const init = (node as any)?.declaration?.declarations?.[0]?.init
+
+          if (isIdentifier(init)) {
+            // 变量
+            exports.push({
+              name,
+              type: ['Identifier'],
+            })
+          }
+          else if (isArrowFunctionExpression(init)) {
+            const params = init.params.map(p => code.slice(p.start!, p.end!)).join(', ')
+            const returnType = init.returnType ? code.slice(init.returnType.start!, init.returnType.end!) : ''
+            exports.push({
+              name,
+              type: ['ArrowFunctionExpression'],
+              params,
+              returnType,
+            })
+          }
+          else if (init === null && declaration.id.typeAnnotation) {
+            const type = declaration.id?.typeAnnotation.typeAnnotation?.type
+            if (!type)
+              continue
+            exports.push({
+              name,
+              type,
+              returnType: code.slice(node.start!, node.end!),
+            })
+          }
+          else {
+            exports.push({
+              name,
+              type: [init.type],
+              returnType: code.slice(init.start!, init.end!),
+            })
+          }
+        }
+        else if (isVariableDeclarator(node.declaration)) {
+          // debugger
+        }
+        else if (isTSInterfaceDeclaration(node.declaration)) {
+          const name = node.declaration.id.name
+          const returnType = code.slice(node.declaration.start!, node.declaration.end!)
+          exports.push({
+            name,
+            returnType,
+            type: ['TSInterfaceDeclaration'],
+          })
+        }
+        else if (isTSTypeAliasDeclaration(node.declaration)) {
+          const name = node.declaration.id.name
+          const returnType = code.slice(node.declaration.start!, node.declaration.end!)
+          exports.push({
+            name,
+            returnType,
+            type: ['TSTypeAliasDeclaration'],
+          })
+        }
+        else if (isTSEnumDeclaration(node.declaration)) {
+          const name = node.declaration.id.name
+          const returnType = code.slice(node.declaration.start!, node.declaration.end!)
+          exports.push({
+            name,
+            returnType,
+            type: ['TSEnumDeclaration'],
+          })
+        }
+        else if (node.specifiers) {
+          exports.push(...node.specifiers.map((specifier) => {
+            if (isExportSpecifier(specifier)) {
+              const name = specifier.local.name
+              const alias = (specifier as any).exported?.name
+              return {
+                name,
+                alias,
+                type: ['Identifier'],
+              }
+            }
+            return false
+          }).filter(Boolean) as ExportType[])
+        }
       }
-      else if (isArrowFunctionExpression(node.declaration)) {
-        const name = (node as any).declaration.id?.name
-        const params = node.declaration.params.map(p => code.slice(p.start!, p.end!)).join(', ')
-        const returnType = node.declaration.returnType ? code.slice(node.declaration.returnType.start!, node.declaration.returnType.end!) : ''
-        exports.push({
-          name,
-          params,
-          returnType,
-          type: ['ArrowFunctionExpression', 'default'],
-        })
+      else if (isExportDefaultDeclaration(node)) {
+        if (isFunctionDeclaration(node.declaration)) {
+          const name = node.declaration.id?.name || ''
+          const params = node.declaration.params.map(p => code.slice(p.start!, p.end!)).join(', ')
+          const returnType = node.declaration.returnType ? code.slice(node.declaration.returnType.start!, node.declaration.returnType.end!) : ''
+          exports.push({
+            name,
+            params,
+            returnType,
+            type: ['Function', 'default'],
+          })
+        }
+        else if (isArrowFunctionExpression(node.declaration)) {
+          const name = (node as any).declaration.id?.name
+          const params = node.declaration.params.map(p => code.slice(p.start!, p.end!)).join(', ')
+          const returnType = node.declaration.returnType ? code.slice(node.declaration.returnType.start!, node.declaration.returnType.end!) : ''
+          exports.push({
+            name,
+            params,
+            returnType,
+            type: ['ArrowFunctionExpression', 'default'],
+          })
+        }
+        else if (isClassDeclaration(node.declaration)) {
+          const name = node.declaration.id!.name
+          const returnType = code.slice(node.declaration.start!, node.declaration.end!)
+          exports.push({
+            name,
+            returnType,
+            type: ['TSEnumDeclaration', 'default'],
+          })
+        }
+        else if (isIdentifier(node.declaration)) {
+          const name = node.declaration.name
+          exports.push({
+            name,
+            type: ['Identifier', 'default'],
+          })
+        }
       }
-      else if (isClassDeclaration(node.declaration)) {
-        const name = node.declaration.id!.name
-        const returnType = code.slice(node.declaration.start!, node.declaration.end!)
-        exports.push({
-          name,
-          returnType,
-          type: ['TSEnumDeclaration', 'default'],
-        })
-      }
-      else if (isIdentifier(node.declaration)) {
-        const name = node.declaration.name
-        exports.push({
-          name,
-          type: ['Identifier', 'default'],
-        })
-      }
-    }
-    else if (isFunctionDeclaration(node)) {
-      const name = node?.id?.name || ''
-      const params = node.params.map(p => code.slice(p.start!, p.end!)).join(', ')
-      const returnType = node.returnType ? code.slice(node.returnType.start!, node.returnType.end!) : ''
-      scoped.push({
-        name,
-        params,
-        returnType,
-        type: 'FunctionDeclaration',
-      })
-    }
-    else if (isVariableDeclarator(node)) {
-      const declaration = (node as any).declarations?.[0]
-      if (!declaration)
-        continue
-      const name = declaration.id.name
-      const init = declaration.init
-      const type = init.type
-      if (isArrowFunctionExpression(init)) {
-        const params = init.params.map(p => code.slice(p.start!, p.end!)).join(', ')
-        const returnType = init.returnType ? code.slice(init.returnType.start!, init.returnType.end!) : ''
-        scoped.push({ name, returnType, params, type })
-      }
-      else if (isIdentifier(init)) {
-        const alias = init.name
+      else if (isFunctionDeclaration(node)) {
+        const name = node?.id?.name || ''
+        const params = node.params.map(p => code.slice(p.start!, p.end!)).join(', ')
+        const returnType = node.returnType ? code.slice(node.returnType.start!, node.returnType.end!) : ''
         scoped.push({
           name,
-          alias,
-          type,
+          params,
+          returnType,
+          type: 'FunctionDeclaration',
         })
       }
-      else {
-        scoped.push({ name, returnType: code.slice(init.start, init.end), type })
+      else if (isVariableDeclarator(node)) {
+        const declaration = (node as any).declarations?.[0]
+        if (!declaration)
+          continue
+        const name = declaration.id.name
+        const init = declaration.init
+        const type = init.type
+        if (isArrowFunctionExpression(init)) {
+          const params = init.params.map(p => code.slice(p.start!, p.end!)).join(', ')
+          const returnType = init.returnType ? code.slice(init.returnType.start!, init.returnType.end!) : ''
+          scoped.push({ name, returnType, params, type })
+        }
+        else if (isIdentifier(init)) {
+          const alias = init.name
+          scoped.push({
+            name,
+            alias,
+            type,
+          })
+        }
+        else {
+          scoped.push({ name, returnType: code.slice(init.start, init.end), type })
+        }
+      }
+      else if (isExportAllDeclaration(node)) {
+        const _exports = getModule(node.source.value, false, _moduleFolder)!.exports
+        if (_exports)
+          exports.push(..._exports)
+      }
+      else if (isClassDeclaration(node)) {
+        const name = node.id!.name || ''
+        scoped.push({
+          name,
+          type: 'ClassDeclaration',
+          returnType: code.slice(node.start!, node.end!),
+        })
+      }
+      else if (isVariableDeclaration(node)) {
+        const name = (node as any).declarations[0].id.name
+        const returnType = code.slice(node.declarations[0].start!, node.declarations[0].end!)
+        scoped.push({
+          name,
+          returnType,
+          type: node.type,
+        })
+      }
+      else if (isTSTypeAliasDeclaration(node)) {
+        const name = node.id.name
+        const returnType = code.slice(node.start!, node.end!)
+        scoped.push({
+          name,
+          returnType,
+          type: 'TSTypeAliasDeclaration',
+        })
+      }
+      else if (!onlyExports && isTSInterfaceDeclaration(node)) {
+        const name = node.id.name
+        const returnType = code.slice(node.start!, node.end!)
+        scoped.push({
+          name,
+          returnType,
+          type: 'TSInterfaceDeclaration',
+        })
       }
     }
-    else if (isExportAllDeclaration(node)) {
-      exports.push(...getModule(node.source.value, false)!.exports)
-    }
-    else if (isClassDeclaration(node)) {
-      const name = node.id!.name || ''
-      scoped.push({
-        name,
-        type: 'ClassDeclaration',
-        returnType: code.slice(node.start!, node.end!),
-      })
-    }
-    else if (isVariableDeclaration(node)) {
-      const name = (node as any).declarations[0].id.name
-      const returnType = code.slice(node.declarations[0].start!, node.declarations[0].end!)
-      scoped.push({
-        name,
-        returnType,
-        type: node.type,
-      })
-    }
-    else if (isTSTypeAliasDeclaration(node)) {
-      const name = node.id.name
-      const returnType = code.slice(node.start!, node.end!)
-      scoped.push({
-        name,
-        returnType,
-        type: 'TSTypeAliasDeclaration',
-      })
-    }
-    else if (!onlyExports && isTSInterfaceDeclaration(node)) {
-      const name = node.id.name
-      const returnType = code.slice(node.start!, node.end!)
-      scoped.push({
-        name,
-        returnType,
-        type: 'TSInterfaceDeclaration',
-      })
+    catch (error) {
+      debugger
     }
   }
   exports = exports.map((item) => {

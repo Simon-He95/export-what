@@ -13,7 +13,8 @@ export let alias: any = null
 if (!alias)
   getAlias().then(data => alias = data)
 
-export function toAbsoluteUrl(url: string) {
+// todo: 判断是否是pnpm通过pnpm 组合命名xx+xx去找目录下的类型
+export function toAbsoluteUrl(url: string, module = '') {
   // 判断是否是node_modules or 相对路径
   if (LOCAL_URL_REG.test(url)) {
     const currentFileUrl = getCurrentFileUrl()
@@ -34,22 +35,36 @@ export function toAbsoluteUrl(url: string) {
       : resolve(currentFileUrl, '..', url)
     const isEnds = suffix.some(s => result.endsWith(s))
     if (isEnds && fs.existsSync(result))
-      return result
+      return { url: result }
+
+    for (const s of suffix) {
+      const _url = `${result}${s}`
+      if (fs.existsSync(_url))
+        return { url: _url }
+    }
 
     for (const s of suffix) {
       const child = resolve(result, `index${s}`)
       if (fs.existsSync(child))
-        return child
+        return { url: child }
     }
   }
   else {
-    const node_modules = resolve(projectRoot, '.', 'node_modules')
-    const moduleFolder = resolve(node_modules, '.', url)
+    let moduleFolder = ''
+    if (module)
+      moduleFolder = resolve(module, '.', url)
+
+    if (!isDirectory(moduleFolder))
+      moduleFolder = resolve(resolve(projectRoot, '.', 'node_modules'), '.', url)
+
+    if (!isDirectory(moduleFolder))
+      return
+
     if (moduleFolder) {
       const url = resolve(moduleFolder, '.', 'package.json')
       const pkg = JSON.parse(fs.readFileSync(url, 'utf-8'))
       const main = pkg.types || pkg.module || pkg.main
-      return resolve(moduleFolder, '.', main)
+      return { url: resolve(moduleFolder, '.', main), moduleFolder: resolve(moduleFolder, 'node_modules') }
     }
   }
 }
@@ -99,6 +114,11 @@ async function getAlias() {
 }
 
 export function isDirectory(url: string) {
-  const stats = fs.statSync(url)
-  return stats.isDirectory()
+  try {
+    const stats = fs.statSync(url)
+    return stats.isDirectory()
+  }
+  catch (error) {
+    return false
+  }
 }
