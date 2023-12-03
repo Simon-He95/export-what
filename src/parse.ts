@@ -344,7 +344,7 @@ export function getModule(url: string, onlyExports = false, moduleFolder?: strin
     }
   }
   exports = exports.map((item) => {
-    const result = findTarget(scoped, imports, item.name) || item
+    const result = findTarget(scoped, imports, item.name, moduleFolder) || item
     if (item.alias) {
       result.returnType = result.returnType?.replace(result.name, item.alias) || ''
       result.name = item.alias
@@ -362,17 +362,17 @@ export function getModule(url: string, onlyExports = false, moduleFolder?: strin
   return result
 }
 
-function findTarget(scoped: ScopedType[], imports: ImportType[], name: string) {
+function findTarget(scoped: ScopedType[], imports: ImportType[], name: string, moduleFolder?: string) {
   const target = scoped.find(s => s.name === name)
   if (target && target.type !== 'Identifier')
     return target
 
   if (target)
-    return findTarget(scoped, imports, target.alias || target.name)
+    return findTarget(scoped, imports, target.alias || target.name, moduleFolder)
 
   const importTarget = imports.find(i => (i.alias || i.name) === name)
   if (importTarget) {
-    const { exports } = getModule(importTarget.source)!
+    const { exports } = getModule(importTarget.source, false, moduleFolder)!
     const t = importTarget?.type === 'default'
       ? exports.find((e: any) => e.type.includes('default'))
       : exports.find((e: any) => (e.alias || e.name) === importTarget.name)

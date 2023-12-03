@@ -13,6 +13,22 @@ export let alias: any = null
 if (!alias)
   getAlias().then(data => alias = data)
 
+export function toPnpmUrl(url: string) {
+  const pnpm = resolve(projectRoot, 'node_modules/.pnpm')
+  const modules = resolve(pnpm, 'lock.yaml')
+  if (!fs.existsSync(modules))
+    return
+  const content = fs.readFileSync(modules, 'utf-8')
+  const versionMatch = content.match(`${url}@([^:]+):`)
+  if (!versionMatch)
+    return
+  const v = versionMatch[1]
+  const toUrl = `${url.replace(/\//g, '+')}@${v}/node_modules/${url}`
+
+  const result = resolve(pnpm, toUrl)
+  return result
+}
+
 // todo: 判断是否是pnpm通过pnpm 组合命名xx+xx去找目录下的类型
 export function toAbsoluteUrl(url: string, module = '') {
   // 判断是否是node_modules or 相对路径
@@ -56,6 +72,9 @@ export function toAbsoluteUrl(url: string, module = '') {
 
     if (!isDirectory(moduleFolder))
       moduleFolder = resolve(resolve(projectRoot, '.', 'node_modules'), '.', url)
+
+    if (!isDirectory(moduleFolder))
+      moduleFolder = toPnpmUrl(url) || moduleFolder
 
     if (!isDirectory(moduleFolder))
       return
