@@ -418,7 +418,10 @@ function findTarget(scoped: ScopedType[], imports: ImportType[], name: string, m
 
   const importTarget = imports.find(i => (i.alias || i.name) === name)
   if (importTarget) {
-    const { exports } = getModule(importTarget.source, false, moduleFolder)!
+    const module = getModule(importTarget.source, false, moduleFolder)
+    if (!module)
+      return target
+    const { exports } = module
     const t = importTarget?.type === 'default'
       ? exports.find((e: any) => e.type.includes('default'))
       : exports.find((e: any) => (e.alias || e.name) === importTarget.name)
