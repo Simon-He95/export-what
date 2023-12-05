@@ -1,12 +1,13 @@
 import { resolve } from 'node:path'
-import fs from 'node:fs'
+import fs, { existsSync } from 'node:fs'
 import { workspace } from 'vscode'
 import { isArray, useJSONParse } from 'lazy-js-utils'
 import { getCurrentFileUrl } from '@vscode-use/utils'
+import { findUpSync } from 'find-up'
 
 const LOCAL_URL_REG = /^(\.|\/|\@\/)/
 
-const projectRoot = workspace.workspaceFolders![0].uri.path
+const _projectRoot = workspace.workspaceFolders![0].uri.path
 const suffix = ['.js', '.ts']
 export let alias: any = null
 
@@ -14,7 +15,7 @@ if (!alias)
   getAlias().then(data => alias = data)
 
 export function toPnpmUrl(url: string) {
-  const pnpm = resolve(projectRoot, 'node_modules/.pnpm')
+  const pnpm = resolve(_projectRoot, 'node_modules/.pnpm')
   const modules = resolve(pnpm, 'lock.yaml')
   if (!fs.existsSync(modules))
     return
@@ -47,7 +48,7 @@ export function toAbsoluteUrl(url: string, module = '') {
     }
 
     const result = isUseAlia
-      ? resolve(projectRoot, '.', url)
+      ? resolve(_projectRoot, '.', url)
       : resolve(currentFileUrl, '..', url)
     const isEnds = suffix.some(s => result.endsWith(s))
     if (isEnds && fs.existsSync(result))
@@ -66,30 +67,71 @@ export function toAbsoluteUrl(url: string, module = '') {
     }
   }
   else {
-    let moduleFolder = ''
-    if (module)
-      moduleFolder = resolve(module, '.', url)
-
-    if (!isDirectory(moduleFolder))
-      moduleFolder = resolve(resolve(projectRoot, '.', 'node_modules'), '.', url)
-
-    if (!isDirectory(moduleFolder))
-      moduleFolder = toPnpmUrl(url) || moduleFolder
-
-    // 从@types中获取
-    if (!isDirectory(moduleFolder))
-      moduleFolder = resolve(resolve(projectRoot, '.', 'node_modules/@types'), '.', url)
-
-    if (!isDirectory(moduleFolder))
-      return
+    const moduleFolder = findNodeModules(module, url)
 
     if (moduleFolder) {
-      const url = resolve(moduleFolder, '.', 'package.json')
-      const pkg = JSON.parse(fs.readFileSync(url, 'utf-8'))
-      const main = pkg.types || pkg.module || pkg.main || pkg?.exports?.types || pkg?.exports?.default
+      const _url = resolve(moduleFolder, '.', 'package.json')
+      const pkg = JSON.parse(fs.readFileSync(_url, 'utf-8'))
+      let main
+      if (url.includes('/')) {
+        const moduleName = url.split('/').slice(-1)[0]
+        const _name = `./${moduleName}`
+        const exportName = pkg?.exports?.[_name]
+        if (exportName) {
+          main = exportName?.types
+          if (!main) {
+            const ts = resolve(moduleFolder, `dist/${moduleName}.d.ts`)
+            if (existsSync(ts))
+              main = ts
+          }
+        }
+      }
+      if (!main)
+        main = pkg.types || pkg.module || pkg.main || pkg?.exports?.types || pkg?.exports?.default
       return { url: resolve(moduleFolder, '.', main), moduleFolder: resolve(moduleFolder, 'node_modules') }
     }
   }
+}
+
+const workspaceCache = new Set()
+export function findNodeModules(module: string, url: string, projectRoot = _projectRoot) {
+  let moduleFolder = ''
+  if (module)
+    moduleFolder = resolve(module, '.', url)
+
+  if (!isDirectory(moduleFolder))
+    moduleFolder = resolve(resolve(projectRoot, '.', 'node_modules'), '.', url)
+
+  if (!isDirectory(moduleFolder))
+    moduleFolder = toPnpmUrl(url) || moduleFolder
+
+  // 从@types中获取
+  if (!isDirectory(moduleFolder))
+    moduleFolder = resolve(resolve(projectRoot, '.', 'node_modules/@types'), '.', url)
+
+  if (!isDirectory(moduleFolder)) {
+    // 判断当前是否是pnpm在子仓找依赖
+    const currentFileUrl = getCurrentFileUrl()
+    const _workspace = findUpSync('node_modules', {
+      cwd: currentFileUrl,
+      stopAt: _projectRoot,
+      type: 'directory',
+    })
+
+    if (_workspace && !workspaceCache.has(_workspace)) {
+      workspaceCache.add(_workspace)
+      const workspace = resolve(_workspace, '..')
+      moduleFolder = findNodeModules(module, url, workspace)
+      if (!isDirectory(moduleFolder) && url.includes('/'))
+        moduleFolder = findNodeModules(module, url.split('/').slice(0, -1).join('/'), workspace)
+    }
+  }
+  if (!isDirectory(moduleFolder) && url.includes('/')) {
+    // 考虑只匹配前面再从exports中匹配后半部份
+    moduleFolder = findNodeModules(module, url.split('/').slice(0, -1).join('/'))
+  }
+
+  return moduleFolder
 }
 
 export function findFile(url: string) {
@@ -113,10 +155,10 @@ export function findFile(url: string) {
 
 async function getAlias() {
   let configUrl = ''
-  if (fs.existsSync(resolve(projectRoot, 'tsconfig.json')))
-    configUrl = resolve(projectRoot, 'tsconfig.json')
-  else if (fs.existsSync(resolve(projectRoot, 'jsconfig.json')))
-    configUrl = resolve(projectRoot, 'jsconfig.json')
+  if (fs.existsSync(resolve(_projectRoot, 'tsconfig.json')))
+    configUrl = resolve(_projectRoot, 'tsconfig.json')
+  else if (fs.existsSync(resolve(_projectRoot, 'jsconfig.json')))
+    configUrl = resolve(_projectRoot, 'jsconfig.json')
 
   if (!configUrl)
     return

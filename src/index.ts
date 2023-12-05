@@ -50,7 +50,9 @@ export function activate(context: ExtensionContext) {
     md.supportHtml = true
     const blocks: string[] = []
     let isTitle = false
-    exportData.forEach((data) => {
+    exportData.sort((a, b) =>
+      a.type.includes('default') ? -1 : 1,
+    ).forEach((data) => {
       const { type, name, alias } = data
       if (type.includes('default')) {
         const _type = type.find(i => i !== 'default')
