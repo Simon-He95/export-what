@@ -16,6 +16,7 @@ import {
   isTSDeclareFunction,
   isTSEnumDeclaration,
   isTSInterfaceDeclaration,
+  isTSModuleDeclaration,
   isTSTypeAliasDeclaration,
   isVariableDeclaration,
   isVariableDeclarator,
@@ -336,6 +337,49 @@ export function getModule(url: string, onlyExports = false, moduleFolder?: strin
           name,
           returnType,
           type: 'TSInterfaceDeclaration',
+        })
+      }
+      else if (!onlyExports && isTSModuleDeclaration(node)) {
+        (node as any).body.body?.forEach((item: any) => {
+          if (isExportNamedDeclaration(item)) {
+            const de = (item as any)?.declaration
+            if (!de)
+              return
+            if (isVariableDeclarator(de) || isVariableDeclaration(de) || isTSEnumDeclaration(de) || isTSTypeAliasDeclaration(de) || isTSModuleDeclaration(de)) {
+              const name = (de as any)?.declarations?.[0]?.id?.name
+              if (!name)
+                return
+              const returnType = code.slice(de.start!, de.end!)
+              exports.push({
+                name,
+                returnType,
+                type: ['Identifier'],
+              })
+            }
+            else if (isTSInterfaceDeclaration(de)) {
+              const name = de.id.name
+              const returnType = code.slice(de.start!, de.end!)
+              exports.push({
+                name,
+                returnType,
+                type: ['Identifier'],
+              })
+            }
+            else if (isClassDeclaration(de)) {
+              const name = de?.id?.name
+              if (!name)
+                return
+              const returnType = code.slice(de.start!, de.end!)
+              exports.push({
+                name,
+                returnType,
+                type: ['ClassDeclaration'],
+              })
+            }
+            else {
+              debugger
+            }
+          }
         })
       }
     }

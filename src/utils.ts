@@ -76,13 +76,17 @@ export function toAbsoluteUrl(url: string, module = '') {
     if (!isDirectory(moduleFolder))
       moduleFolder = toPnpmUrl(url) || moduleFolder
 
+    // 从@types中获取
+    if (!isDirectory(moduleFolder))
+      moduleFolder = resolve(resolve(projectRoot, '.', 'node_modules/@types'), '.', url)
+
     if (!isDirectory(moduleFolder))
       return
 
     if (moduleFolder) {
       const url = resolve(moduleFolder, '.', 'package.json')
       const pkg = JSON.parse(fs.readFileSync(url, 'utf-8'))
-      const main = pkg.types || pkg.module || pkg.main
+      const main = pkg.types || pkg.module || pkg.main || pkg?.exports?.types || pkg?.exports?.default
       return { url: resolve(moduleFolder, '.', main), moduleFolder: resolve(moduleFolder, 'node_modules') }
     }
   }

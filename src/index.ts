@@ -6,7 +6,7 @@ import type { ExportType } from './parse'
 import { getModule } from './parse'
 
 export function activate(context: ExtensionContext) {
-  const IMPORT_REG = /import\s*(.*)\s*from ["']([^"']*)["']/
+  const IMPORT_REG = /import\s*(.*)\s*from\s+["']([^"']*)["']/
   const REQUIRE_REG = /require\(["']([^"']*)["']\)/
 
   context.subscriptions.push(vscode.languages.registerHoverProvider('*', {
@@ -19,7 +19,7 @@ export function activate(context: ExtensionContext) {
       const importMatch = lineText.match(IMPORT_REG)
       // 判断是否是hover到了路径才触发提示
       if (importMatch) {
-        const start = lineText.indexOf(importMatch.input!) + importMatch.input!.indexOf(importMatch[2]) - 1
+        const start = lineText.indexOf(importMatch.input!) + importMatch.input!.lastIndexOf(importMatch[2]) - 1
         const end = start + importMatch[2].length + 1
         if ((character < start) || (character > end))
           return
