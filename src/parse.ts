@@ -345,7 +345,7 @@ export function getModule(url: string, onlyExports = false, moduleFolder?: strin
             const de = (item as any)?.declaration
             if (!de)
               return
-            if (isVariableDeclarator(de) || isVariableDeclaration(de) || isTSEnumDeclaration(de) || isTSTypeAliasDeclaration(de) || isTSModuleDeclaration(de)) {
+            if (isVariableDeclarator(de) || isVariableDeclaration(de) || isTSEnumDeclaration(de) || isTSTypeAliasDeclaration(de)) {
               const name = (de as any)?.declarations?.[0]?.id?.name
               if (!name)
                 return
@@ -356,8 +356,10 @@ export function getModule(url: string, onlyExports = false, moduleFolder?: strin
                 type: ['Identifier'],
               })
             }
-            else if (isTSInterfaceDeclaration(de)) {
-              const name = de.id.name
+            else if (isTSInterfaceDeclaration(de) || isTSModuleDeclaration(de)) {
+              const name = (de as any).id?.name
+              if (!name)
+                return
               const returnType = code.slice(de.start!, de.end!)
               exports.push({
                 name,
