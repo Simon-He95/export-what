@@ -379,14 +379,14 @@ export function getModule(url: string, onlyExports = false, moduleFolder?: strin
               })
             }
             else {
-              debugger
+              // debugger
             }
           }
         })
       }
     }
     catch (error) {
-      debugger
+      // debugger
     }
   }
   exports = exports.map((item) => {
