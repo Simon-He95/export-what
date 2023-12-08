@@ -8,7 +8,7 @@ import { findUpSync } from 'find-up'
 const LOCAL_URL_REG = /^(\.|\/|\@\/)/
 
 const _projectRoot = workspace.workspaceFolders![0].uri.path
-const suffix = ['.js', '.ts']
+const suffix = ['.ts', '.js', '.tsx', '.jsx']
 export let alias: any = null
 
 if (!alias)
@@ -87,7 +87,7 @@ export function toAbsoluteUrl(url: string, module = '') {
         }
       }
       if (!main)
-        main = pkg.types || pkg.module || pkg.main || pkg?.exports?.types || pkg?.exports?.default
+        main = pkg.types || pkg.typings || pkg.module || pkg.main || pkg?.exports?.types || pkg?.exports?.default
       return { url: resolve(moduleFolder, '.', main), moduleFolder: resolve(moduleFolder, 'node_modules') }
     }
   }
