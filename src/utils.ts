@@ -1,9 +1,9 @@
 import { resolve } from 'node:path'
 import { existsSync, promises, readFileSync, statSync } from 'node:fs'
-import { workspace } from 'vscode'
+import { window, workspace } from 'vscode'
 import type { Position } from 'vscode'
 import { isArray, useJSONParse } from 'lazy-js-utils'
-import { getActiveText, getCurrentFileUrl, isInPosition } from '@vscode-use/utils'
+import { getActiveText, getActiveTextEditorLanguageId, getCurrentFileUrl, isInPosition } from '@vscode-use/utils'
 import { findUpSync } from 'find-up'
 import { parser } from './parse'
 
@@ -53,7 +53,7 @@ export function toAbsoluteUrl(url: string, module = '') {
       ? resolve(_projectRoot, '.', url)
       : resolve(currentFileUrl, '..', url)
 
-    if (existsSync(result))
+    if (existsSync(result) && statSync(result).isFile())
       return { url: result }
 
     for (const s of suffix) {
@@ -192,16 +192,44 @@ export function isDirectory(url: string) {
 
 export function getImportSource(pos: Position) {
   const text = getActiveText()!
-  const ast = parser(text)
-  for (const item of ast.program.body) {
-    if (item.type === 'ImportDeclaration' && isInPosition(item.loc!, pos)) {
-      const imports = text.slice(item.start!, item.source.start!)
-      return {
-        imports,
-        source: item.source.value,
-        isInSource: isInPosition(item.source.loc!, pos),
+  const isVue = getActiveTextEditorLanguageId() === 'vue'
+  if (isVue) {
+    // 如果是vue就拿script
+    const offset = window.activeTextEditor!.document.offsetAt(pos)
+
+    for (const match of text.matchAll(/<script[^>]+>(.*)<\/script>/sg)) {
+      const [all, content] = match
+      const ast = parser(content)
+
+      const baseOffset = match.index! + all.indexOf(content)
+      for (const item of ast.program.body) {
+        // 需要计算一个新的loc
+        const start = item.loc!.start.index + baseOffset
+        const end = item.loc!.end.index + baseOffset
+        if (item.type === 'ImportDeclaration' && start < offset && end > offset) {
+          const imports = text.slice(item.start! + baseOffset, item.source.start! + baseOffset)
+          return {
+            imports,
+            source: item.source.value,
+            isInSource: isInPosition(item.source.loc!, pos),
+          }
+        }
+        continue
       }
     }
-    continue
+  }
+  else {
+    const ast = parser(text)
+    for (const item of ast.program.body) {
+      if (item.type === 'ImportDeclaration' && isInPosition(item.loc!, pos)) {
+        const imports = text.slice(item.start!, item.source.start!)
+        return {
+          imports,
+          source: item.source.value,
+          isInSource: isInPosition(item.source.loc!, pos),
+        }
+      }
+      continue
+    }
   }
 }
