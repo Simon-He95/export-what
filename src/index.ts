@@ -1,4 +1,4 @@
-import { createCompletionItem, getLineText, getSelection, registerCompletionItemProvider } from '@vscode-use/utils'
+import { createCompletionItem, getSelection, registerCompletionItemProvider } from '@vscode-use/utils'
 import { isArray, toArray } from 'lazy-js-utils'
 import * as vscode from 'vscode'
 import type { ExtensionContext } from 'vscode'
@@ -7,26 +7,16 @@ import { getModule } from './parse'
 import { getImportSource } from './utils'
 
 export function activate(context: ExtensionContext) {
-  const IMPORT_REG = /import\s*(.*)\s*from\s+["']([^"']*)["']/s
-  const REQUIRE_REG = /require\(["']([^"']*)["']\)/s
-
   context.subscriptions.push(vscode.languages.registerHoverProvider('*', {
     async provideHover(_, position) {
-      const lineText = getLineText(position.line)
-      const character = position.character
-      if (!IMPORT_REG.test(lineText) && !REQUIRE_REG.test(lineText))
+      const source = getImportSource(position)
+      if (!source)
         return
 
-      const importMatch = lineText.match(IMPORT_REG)
-      // 判断是否是hover到了路径才触发提示
-      if (importMatch) {
-        const start = lineText.indexOf(importMatch.input!) + importMatch.input!.lastIndexOf(importMatch[2]) - 1
-        const end = start + importMatch[2].length + 1
-        if ((character < start) || (character > end))
-          return
-      }
+      if (!source.isInSource)
+        return
 
-      const data = await getModule(importMatch![2])
+      const data = await getModule(source.source)
       if (data)
         return getHoverMd(data.exports)
     },
@@ -83,6 +73,7 @@ export function activate(context: ExtensionContext) {
     VariableDeclaration: 5,
     TSFunctionType: 24,
     TSTypeLiteral: 24,
+    JSON: 0,
   }
 
   function getCompletion(exportData: ExportType[], currentModule: string) {
@@ -149,22 +140,54 @@ export function activate(context: ExtensionContext) {
         if (isTypeOnly && !['TSInterfaceDeclaration', 'TSTypeAliasDeclaration', 'TSEnumDeclaration', 'TSFunctionType', 'TSTypeLiteral'].includes(type[0]))
           return false
         return true
-      }).map(({ name, type, returnType }) => {
+      }).map(({ name, type, returnType, raw, params = '', optionsTypes }) => {
         let _type: any = isArray(type) ? type.filter(t => t !== 'default') : [type]
         if (_type.length > 1)
           _type = _type.filter((t: string) => t !== 'Identifier')
+        const detail = `${params ? `参数：${params}` : ''}${returnType ? `\n\n返回类型：${returnType}` : ''}`
 
+        const documentation = new vscode.MarkdownString()
+        documentation.isTrusted = true
+        documentation.supportHtml = true
+        const details = []
+        optionsTypes = optionsTypes?.map(i => i.trim()).filter(Boolean)
+        if (optionsTypes && optionsTypes.length) {
+          details.push('## 参数类型')
+          details.push('```')
+          details.push(...optionsTypes)
+          details.push('```')
+        }
+        if (raw) {
+          details.push('## 定义')
+          details.push(`\`\`\`\n${raw}\n\`\`\``)
+        }
+        documentation.appendMarkdown(details.join('\n\n'))
         _type = _type[0]
-        return createCompletionItem({ content: `Export: ${name}  ->  ${type}`, snippet: set_exports_snippet(name), type: typeCode[_type] ?? 8, detail: returnType })
+        return createCompletionItem({ content: `Export: ${name}  ->  ${type}`, snippet: set_exports_snippet(name), type: typeCode[_type] ?? 8, detail, documentation })
       }),
       ...show_default
-        ? exportData.filter(({ type }) => type.includes('default')).map(({ name, type, returnType }) => {
+        ? exportData.filter(({ type }) => type.includes('default')).map(({ name, raw, params, optionsTypes, returnType, type }) => {
           let _type: any = isArray(type) ? type.filter(t => t !== 'default') : type
           if (_type.length > 1)
             _type = _type.filter((t: string) => t !== 'Identifier')
+          const detail = `${params} ${returnType}`
+
+          const documentation = new vscode.MarkdownString()
+          documentation.isTrusted = true
+          documentation.supportHtml = true
+          const details = []
+          if (optionsTypes && optionsTypes.length) {
+            details.push('## 参数类型')
+            details.push(...optionsTypes)
+          }
+          if (raw) {
+            details.push('## 定义')
+            details.push(raw)
+          }
+          documentation.appendMarkdown(details.join('\n\n'))
 
           _type = _type[0]
-          return createCompletionItem({ content: `Export Default: ${name}  ->  ${type}`, snippet: name, type: typeCode[_type] ?? 5, detail: returnType })
+          return createCompletionItem({ content: `Export Default: ${name}  ->  ${type}`, snippet: name, type: typeCode[_type] ?? 5, detail, documentation })
         })
         : [],
     ]

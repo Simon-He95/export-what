@@ -52,8 +52,8 @@ export function toAbsoluteUrl(url: string, module = '') {
     const result = isUseAlia
       ? resolve(_projectRoot, '.', url)
       : resolve(currentFileUrl, '..', url)
-    const isEnds = suffix.some(s => result.endsWith(s))
-    if (isEnds && existsSync(result))
+
+    if (existsSync(result))
       return { url: result }
 
     for (const s of suffix) {
@@ -199,6 +199,7 @@ export function getImportSource(pos: Position) {
       return {
         imports,
         source: item.source.value,
+        isInSource: isInPosition(item.source.loc!, pos),
       }
     }
     continue

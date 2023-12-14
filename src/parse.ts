@@ -50,6 +50,8 @@ export interface ExportType {
   params?: string
   returnType?: string
   type: string[]
+  optionsTypes?: string[]
+  raw?: string
 }
 
 interface ScopedType {
@@ -57,7 +59,9 @@ interface ScopedType {
   alias?: string
   params?: string
   returnType?: string
+  optionsTypes?: string[]
   type: string
+  raw?: string
 }
 const urlMap = new Map()
 const codeMap = new Map()
@@ -68,6 +72,7 @@ export function getModule(url: string, onlyExports = false, moduleFolder?: strin
     return
   const { url: _url, moduleFolder: _moduleFolder } = urlInfo
   url = _url
+
   const code = fs.readFileSync(url, 'utf-8')
   if (urlMap.has(url)) {
     const originCode = urlMap.get(url)
@@ -77,10 +82,33 @@ export function getModule(url: string, onlyExports = false, moduleFolder?: strin
   }
   urlMap.set(url, code)
 
-  const ast = parser(code)
   const imports: ImportType[] = []
   let exports: ExportType[] = []
   const scoped: ScopedType[] = []
+
+  if (url.endsWith('.json')) {
+    // 对于json文件不用再解析了
+    const json = JSON.parse(code)
+    Object.keys(json).forEach((k) => {
+      const v = json[k]
+      exports.push({
+        name: k,
+        type: ['JSON'],
+        returnType: JSON.stringify(v),
+        raw: JSON.stringify(v),
+      })
+    })
+    const result = {
+      imports,
+      exports,
+      scoped,
+    }
+    codeMap.set(code, result)
+
+    return result
+  }
+
+  const ast = parser(code)
   const body = ast.program.body
 
   for (const node of body) {
@@ -273,6 +301,7 @@ export function getModule(url: string, onlyExports = false, moduleFolder?: strin
           params,
           returnType,
           type: 'FunctionDeclaration',
+          raw: code.slice(node.start!, node.end!),
         })
       }
       else if (isVariableDeclarator(node)) {
@@ -285,7 +314,13 @@ export function getModule(url: string, onlyExports = false, moduleFolder?: strin
         if (isArrowFunctionExpression(init)) {
           const params = init.params.map(p => code.slice(p.start!, p.end!)).join(', ')
           const returnType = init.returnType ? code.slice(init.returnType.start!, init.returnType.end!) : ''
-          scoped.push({ name, returnType, params, type })
+          scoped.push({
+            name,
+            returnType,
+            params,
+            type,
+            raw: code.slice((node as any).start!, (node as any).end!),
+          })
         }
         else if (isIdentifier(init)) {
           const alias = init.name
@@ -296,7 +331,12 @@ export function getModule(url: string, onlyExports = false, moduleFolder?: strin
           })
         }
         else {
-          scoped.push({ name, returnType: code.slice(init.start, init.end), type })
+          scoped.push({
+            name,
+            returnType: code.slice(init.start, init.end),
+            type,
+            raw: code.slice((node as any).start!, (node as any).end!),
+          })
         }
       }
       else if (isExportAllDeclaration(node)) {
@@ -310,6 +350,7 @@ export function getModule(url: string, onlyExports = false, moduleFolder?: strin
           name,
           type: 'ClassDeclaration',
           returnType: code.slice(node.start!, node.end!),
+          raw: code.slice(node.start!, node.end!),
         })
       }
       else if (isVariableDeclaration(node)) {
@@ -319,25 +360,44 @@ export function getModule(url: string, onlyExports = false, moduleFolder?: strin
           name,
           returnType,
           type: node.type,
+          raw: code.slice(node.start!, node.end!),
         })
       }
       else if (isTSTypeAliasDeclaration(node)) {
         const name = node.id.name
-        const returnType = code.slice(node.start!, node.end!)
-        scoped.push({
-          name,
-          returnType,
-          type: 'TSTypeAliasDeclaration',
-        })
+        const optionsType = code.slice(node.start!, node.end!)
+        const t = scoped.find(i => i.name === name)
+        if (t) {
+          if (t.optionsTypes)
+            t.optionsTypes.push(optionsType)
+          else
+            t.optionsTypes = [optionsType]
+        }
+        else {
+          scoped.push({
+            name,
+            optionsTypes: [optionsType],
+            type: 'TSTypeAliasDeclaration',
+          })
+        }
       }
       else if (!onlyExports && isTSInterfaceDeclaration(node)) {
         const name = node.id.name
-        const returnType = code.slice(node.start!, node.end!)
-        scoped.push({
-          name,
-          returnType,
-          type: 'TSInterfaceDeclaration',
-        })
+        const optionsType = code.slice(node.start!, node.end!)
+        const t = scoped.find(i => i.name === name)
+        if (t) {
+          if (t.optionsTypes)
+            t.optionsTypes.push(optionsType)
+          else
+            t.optionsTypes = [optionsType]
+        }
+        else {
+          scoped.push({
+            name,
+            optionsTypes: [optionsType],
+            type: 'TSInterfaceDeclaration',
+          })
+        }
       }
       else if (!onlyExports && isTSModuleDeclaration(node)) {
         (node as any).body.body?.forEach((item: any) => {
@@ -383,6 +443,26 @@ export function getModule(url: string, onlyExports = false, moduleFolder?: strin
             }
           }
         })
+      }
+      else if (!onlyExports && isTSDeclareFunction(node)) {
+        const name = node?.id?.name || ''
+        const params = node.params.map(p => code.slice(p.start!, p.end!)).join(', ')
+        const returnType = node.returnType ? code.slice(node.returnType.start!, node.returnType.end!) : ''
+        const t = scoped.find(i => i.name === name)
+        if (t) {
+          t.params = params
+          t.returnType = returnType
+          t.type = 'FunctionDeclaration'
+        }
+        else {
+          scoped.push({
+            name,
+            params,
+            returnType,
+            type: 'FunctionDeclaration',
+            raw: code.slice(node.start!, node.end!),
+          })
+        }
       }
     }
     catch (error) {
