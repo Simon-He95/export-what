@@ -4,10 +4,11 @@ import * as vscode from 'vscode'
 import type { ExtensionContext } from 'vscode'
 import type { ExportType } from './parse'
 import { getModule } from './parse'
+import { getImportSource } from './utils'
 
 export function activate(context: ExtensionContext) {
-  const IMPORT_REG = /import\s*(.*)\s*from\s+["']([^"']*)["']/
-  const REQUIRE_REG = /require\(["']([^"']*)["']\)/
+  const IMPORT_REG = /import\s*(.*)\s*from\s+["']([^"']*)["']/s
+  const REQUIRE_REG = /require\(["']([^"']*)["']\)/s
 
   context.subscriptions.push(vscode.languages.registerHoverProvider('*', {
     async provideHover(_, position) {
@@ -33,15 +34,13 @@ export function activate(context: ExtensionContext) {
 
   const filter = ['javascript', 'javascriptreact', 'typescript', 'typescriptreact', 'vue', 'svelte']
   context.subscriptions.push(registerCompletionItemProvider(filter, async (_document, position) => {
-    const lineText = getLineText(position.line)
-    if (!IMPORT_REG.test(lineText) && !REQUIRE_REG.test(lineText))
+    const source = getImportSource(position)
+    if (!source)
       return
-    const importMatch = lineText.match(IMPORT_REG)
-
-    const data = await getModule(importMatch![2])
+    const data = await getModule(source.source)
 
     if (data)
-      return getCompletion(data.exports, importMatch![1])
+      return getCompletion(data.exports, source.imports)
   }, [' ', ',']))
 
   function getHoverMd(exportData: ExportType[]) {

@@ -1,9 +1,11 @@
 import { resolve } from 'node:path'
-import fs, { existsSync } from 'node:fs'
+import { existsSync, promises, readFileSync, statSync } from 'node:fs'
 import { workspace } from 'vscode'
+import type { Position } from 'vscode'
 import { isArray, useJSONParse } from 'lazy-js-utils'
-import { getCurrentFileUrl } from '@vscode-use/utils'
+import { getActiveText, getCurrentFileUrl, isInPosition } from '@vscode-use/utils'
 import { findUpSync } from 'find-up'
+import { parser } from './parse'
 
 const LOCAL_URL_REG = /^(\.|\/|\@\/)/
 
@@ -17,9 +19,9 @@ if (!alias)
 export function toPnpmUrl(url: string) {
   const pnpm = resolve(_projectRoot, 'node_modules/.pnpm')
   const modules = resolve(pnpm, 'lock.yaml')
-  if (!fs.existsSync(modules))
+  if (!existsSync(modules))
     return
-  const content = fs.readFileSync(modules, 'utf-8')
+  const content = readFileSync(modules, 'utf-8')
   const versionMatch = content.match(`${url}@([^:]+):`)
   if (!versionMatch)
     return
@@ -51,18 +53,18 @@ export function toAbsoluteUrl(url: string, module = '') {
       ? resolve(_projectRoot, '.', url)
       : resolve(currentFileUrl, '..', url)
     const isEnds = suffix.some(s => result.endsWith(s))
-    if (isEnds && fs.existsSync(result))
+    if (isEnds && existsSync(result))
       return { url: result }
 
     for (const s of suffix) {
       const _url = `${result}${s}`
-      if (fs.existsSync(_url))
+      if (existsSync(_url))
         return { url: _url }
     }
 
     for (const s of suffix) {
       const child = resolve(result, `index${s}`)
-      if (fs.existsSync(child))
+      if (existsSync(child))
         return { url: child }
     }
   }
@@ -71,7 +73,7 @@ export function toAbsoluteUrl(url: string, module = '') {
 
     if (moduleFolder) {
       const _url = resolve(moduleFolder, '.', 'package.json')
-      const pkg = JSON.parse(fs.readFileSync(_url, 'utf-8'))
+      const pkg = JSON.parse(readFileSync(_url, 'utf-8'))
       let main
       if (url.includes('/')) {
         const moduleName = url.split('/').slice(-1)[0]
@@ -141,7 +143,7 @@ export function findFile(url: string) {
       return url
 
     const temp = `${url}${s}`
-    if (fs.existsSync(temp))
+    if (existsSync(temp))
       return temp
   }
   if (target)
@@ -155,15 +157,15 @@ export function findFile(url: string) {
 
 async function getAlias() {
   let configUrl = ''
-  if (fs.existsSync(resolve(_projectRoot, 'tsconfig.json')))
+  if (existsSync(resolve(_projectRoot, 'tsconfig.json')))
     configUrl = resolve(_projectRoot, 'tsconfig.json')
-  else if (fs.existsSync(resolve(_projectRoot, 'jsconfig.json')))
+  else if (existsSync(resolve(_projectRoot, 'jsconfig.json')))
     configUrl = resolve(_projectRoot, 'jsconfig.json')
 
   if (!configUrl)
     return
 
-  const _config = useJSONParse(await fs.promises.readFile(configUrl, 'utf-8'))
+  const _config = useJSONParse(await promises.readFile(configUrl, 'utf-8'))
   if (_config) {
     const paths = _config?.compilerOptions?.paths
     if (!paths)
@@ -180,10 +182,25 @@ async function getAlias() {
 
 export function isDirectory(url: string) {
   try {
-    const stats = fs.statSync(url)
+    const stats = statSync(url)
     return stats.isDirectory()
   }
   catch (error) {
     return false
+  }
+}
+
+export function getImportSource(pos: Position) {
+  const text = getActiveText()!
+  const ast = parser(text)
+  for (const item of ast.program.body) {
+    if (item.type === 'ImportDeclaration' && isInPosition(item.loc!, pos)) {
+      const imports = text.slice(item.start!, item.source.start!)
+      return {
+        imports,
+        source: item.source.value,
+      }
+    }
+    continue
   }
 }
