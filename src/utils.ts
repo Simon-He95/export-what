@@ -33,11 +33,9 @@ export function toPnpmUrl(url: string) {
 }
 
 // todo: 判断是否是pnpm通过pnpm 组合命名xx+xx去找目录下的类型
-export function toAbsoluteUrl(url: string, module = '') {
+export function toAbsoluteUrl(url: string, module = '', currentFileUrl = getCurrentFileUrl()!) {
   // 判断是否是node_modules or 相对路径
   if (LOCAL_URL_REG.test(url)) {
-    const currentFileUrl = getCurrentFileUrl()
-
     let isUseAlia = false
 
     if (alias) {

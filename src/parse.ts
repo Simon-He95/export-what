@@ -66,8 +66,8 @@ interface ScopedType {
 const urlMap = new Map()
 const codeMap = new Map()
 
-export function getModule(url: string, onlyExports = false, moduleFolder?: string) {
-  const urlInfo = toAbsoluteUrl(url, moduleFolder)!
+export function getModule(url: string, onlyExports = false, moduleFolder?: string, currentUrl?: string) {
+  const urlInfo = toAbsoluteUrl(url, moduleFolder, currentUrl)!
   if (!urlInfo)
     return
   const { url: _url, moduleFolder: _moduleFolder } = urlInfo
@@ -242,10 +242,12 @@ export function getModule(url: string, onlyExports = false, moduleFolder?: strin
             if (isExportSpecifier(specifier)) {
               const name = specifier.local.name
               const alias = (specifier as any).exported?.name
+              const source = node?.source?.value
               return {
                 name,
                 alias,
                 type: ['Identifier'],
+                source,
               }
             }
             return false
@@ -340,7 +342,7 @@ export function getModule(url: string, onlyExports = false, moduleFolder?: strin
         }
       }
       else if (isExportAllDeclaration(node)) {
-        const _exports = getModule(node.source.value, false, _moduleFolder)!.exports
+        const _exports = getModule(node.source.value, false, _moduleFolder, url)!.exports
         if (_exports)
           exports.push(..._exports)
       }
@@ -470,7 +472,7 @@ export function getModule(url: string, onlyExports = false, moduleFolder?: strin
     }
   }
   exports = exports.map((item) => {
-    const result = findTarget(scoped, imports, item.name, moduleFolder) || item
+    const result = findTarget(scoped, imports, item.name, moduleFolder, url) || item
     if (item.alias) {
       result.returnType = result.returnType?.replace(result.name, item.alias) || ''
       result.name = item.alias
@@ -488,17 +490,17 @@ export function getModule(url: string, onlyExports = false, moduleFolder?: strin
   return result
 }
 
-function findTarget(scoped: ScopedType[], imports: ImportType[], name: string, moduleFolder?: string) {
+function findTarget(scoped: ScopedType[], imports: ImportType[], name: string, moduleFolder?: string, currentUrl?: string) {
   const target = scoped.find(s => s.name === name)
   if (target && target.type !== 'Identifier')
     return target
 
   if (target)
-    return findTarget(scoped, imports, target.alias || target.name, moduleFolder)
+    return findTarget(scoped, imports, target.alias || target.name, moduleFolder, currentUrl)
 
   const importTarget = imports.find(i => (i.alias || i.name) === name)
   if (importTarget) {
-    const module = getModule(importTarget.source, false, moduleFolder)
+    const module = getModule(importTarget.source, false, moduleFolder, currentUrl)
     if (!module)
       return target
     const { exports } = module
