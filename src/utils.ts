@@ -111,7 +111,7 @@ export function findNodeModules(module: string, url: string, projectRoot = _proj
 
   if (!isDirectory(moduleFolder)) {
     // 判断当前是否是pnpm在子仓找依赖
-    const currentFileUrl = getCurrentFileUrl()
+    const currentFileUrl = getCurrentFileUrl()!
     const _workspace = findUpSync('node_modules', {
       cwd: currentFileUrl,
       stopAt: _projectRoot,
