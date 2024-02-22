@@ -9,7 +9,7 @@ import { parser } from './parse'
 
 const LOCAL_URL_REG = /^(\.|\/|\@\/)/
 
-const _projectRoot = workspace.workspaceFolders![0].uri.path
+const _projectRoot = workspace.workspaceFolders![0].uri.path.replace(/^\/([a-zA-Z])\:/, '$1:')
 const suffix = ['.ts', '.js', '.tsx', '.jsx']
 export let alias: any = null
 
