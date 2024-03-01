@@ -71,6 +71,10 @@ export function toAbsoluteUrl(url: string, module = '', currentFileUrl = getCurr
 
     if (moduleFolder) {
       const _url = resolve(moduleFolder, '.', 'package.json')
+      if (!existsSync(_url)) {
+        // todo: 修复没找到的文件
+        return
+      }
       const pkg = JSON.parse(readFileSync(_url, 'utf-8'))
       let main
       if (url.includes('/')) {
@@ -126,6 +130,7 @@ export function findNodeModules(module: string, url: string, projectRoot = _proj
         moduleFolder = findNodeModules(module, url.split('/').slice(0, -1).join('/'), workspace)
     }
   }
+
   if (!isDirectory(moduleFolder) && url.includes('/')) {
     // 考虑只匹配前面再从exports中匹配后半部份
     moduleFolder = findNodeModules(module, url.split('/').slice(0, -1).join('/'))

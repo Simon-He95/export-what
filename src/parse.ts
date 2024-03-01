@@ -1,4 +1,4 @@
-import fs from 'node:fs'
+import fs, { existsSync } from 'node:fs'
 import type { ParserOptions } from '@babel/parser'
 import { parse } from '@babel/parser'
 import {
@@ -72,7 +72,8 @@ export function getModule(url: string, onlyExports = false, moduleFolder?: strin
     return
   const { url: _url, moduleFolder: _moduleFolder } = urlInfo
   url = _url
-
+  if (!existsSync(url))
+    return
   const code = fs.readFileSync(url, 'utf-8')
   if (urlMap.has(url)) {
     const originCode = urlMap.get(url)
@@ -473,6 +474,7 @@ export function getModule(url: string, onlyExports = false, moduleFolder?: strin
   }
   exports = exports.map((item) => {
     const result = findTarget(scoped, imports, item.name, moduleFolder, url) || item
+
     if (item.alias) {
       result.returnType = result.returnType?.replace(result.name, item.alias) || ''
       result.name = item.alias
