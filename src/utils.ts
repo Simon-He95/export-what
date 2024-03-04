@@ -3,7 +3,7 @@ import { existsSync, promises, readFileSync, statSync } from 'node:fs'
 import { window, workspace } from 'vscode'
 import type { Position } from 'vscode'
 import { isArray, useJSONParse } from 'lazy-js-utils'
-import { getActiveText, getActiveTextEditorLanguageId, getCurrentFileUrl, isInPosition } from '@vscode-use/utils'
+import { getActiveText, getActiveTextEditorLanguageId, getCurrentFileUrl, getLineText, isInPosition } from '@vscode-use/utils'
 import { findUpSync } from 'find-up'
 import { parser } from './parse'
 
@@ -193,6 +193,8 @@ export function isDirectory(url: string) {
   }
 }
 
+const IMPORTREG = /import(\s+)from\s+['"]([^"']+)['"]/
+
 export function getImportSource(pos: Position) {
   const text = getActiveText()!
   const isVue = getActiveTextEditorLanguageId() === 'vue'
@@ -219,6 +221,17 @@ export function getImportSource(pos: Position) {
         }
         continue
       }
+    }
+    const lineText = getLineText(pos.line)?.trim()
+    if (!lineText)
+      return
+    const match = lineText.match(IMPORTREG)
+    if (!match)
+      return
+    return {
+      imports: match[0],
+      source: match[2],
+      isInSource: false,
     }
   }
   else {
