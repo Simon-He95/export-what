@@ -124,7 +124,7 @@ export function activate(context: ExtensionContext) {
         while (lineText[pos] === ' ' && pos > start)
           pos--
 
-        if (lineText[pos] !== ',')
+        if (lineText[pos] !== ',' && lineText.slice(Math.max(pos - 5, 0), pos + 1) !== 'import')
           set_exports_snippet = (v: string) => `, { ${v}$1 }`
         else if (pos !== character - 1)
           set_exports_snippet = (v: string) => `{ ${v}$1 }`
