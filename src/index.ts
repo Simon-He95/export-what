@@ -187,7 +187,7 @@ export function activate(context: ExtensionContext) {
           documentation.appendMarkdown(details.join('\n\n'))
 
           _type = _type[0]
-          return createCompletionItem({ content: `Export Default: ${name}  ->  ${type}`, snippet: name, type: typeCode[_type] ?? 5, detail, documentation })
+          return createCompletionItem({ content: `Export Default: ${name}  ->  ${type}`, snippet: name, type: typeCode[_type] ?? 5, detail, documentation, sortText: '0', preselect: true })
         })
         : [],
     ]

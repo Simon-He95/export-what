@@ -3,7 +3,7 @@ import { existsSync, promises, readFileSync, statSync } from 'node:fs'
 import { window, workspace } from 'vscode'
 import type { Position } from 'vscode'
 import { isArray, useJSONParse } from 'lazy-js-utils'
-import { getActiveText, getActiveTextEditorLanguageId, getCurrentFileUrl, getLineText, isInPosition } from '@vscode-use/utils'
+import { getActiveText, getActiveTextEditor, getActiveTextEditorLanguageId, getCurrentFileUrl, getLineText, isInPosition } from '@vscode-use/utils'
 import { findUpSync } from 'find-up'
 import { parser } from './parse'
 
@@ -198,9 +198,10 @@ const IMPORTREG = /import(\s+)from\s+['"]([^"']+)['"]/
 export function getImportSource(pos: Position) {
   const text = getActiveText()!
   const isVue = getActiveTextEditorLanguageId() === 'vue'
+  const activeTextEditor = getActiveTextEditor()!
   if (isVue) {
     // 如果是vue就拿script
-    const offset = window.activeTextEditor!.document.offsetAt(pos)
+    const offset = activeTextEditor.document.offsetAt(pos)
 
     for (const match of text.matchAll(/<script[^>]+>(.*)<\/script>/sg)) {
       const [all, content] = match
@@ -246,6 +247,17 @@ export function getImportSource(pos: Position) {
         }
       }
       continue
+    }
+    const lineText = getLineText(pos.line)?.trim()
+    if (!lineText)
+      return
+    const match = lineText.match(IMPORTREG)
+    if (!match)
+      return
+    return {
+      imports: match[0],
+      source: match[2],
+      isInSource: false,
     }
   }
 }
