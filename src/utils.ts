@@ -1,10 +1,11 @@
 import { resolve } from 'node:path'
 import { existsSync, promises, readFileSync, statSync } from 'node:fs'
-import { window, workspace } from 'vscode'
+import { workspace } from 'vscode'
 import type { Position } from 'vscode'
 import { isArray, useJSONParse } from 'lazy-js-utils'
 import { getActiveText, getActiveTextEditor, getActiveTextEditorLanguageId, getCurrentFileUrl, getLineText, isInPosition } from '@vscode-use/utils'
 import { findUpSync } from 'find-up'
+import fg from 'fast-glob'
 import { parser } from './parse'
 
 const LOCAL_URL_REG = /^(\.|\/|\@\/)/
@@ -25,11 +26,17 @@ export function toPnpmUrl(url: string) {
   const versionMatch = content.match(`${url}@([^:]+):`)
   if (!versionMatch)
     return
-  const v = versionMatch[1]
-  const toUrl = `${url.replace(/\//g, '+')}@${v}/node_modules/${url}`
+  const v = versionMatch[1].replace(/['"]/g, '')
+  const toUrl = `${url.replace(/\//g, '+')}@${v}*/node_modules/${url}`
 
-  const result = resolve(pnpm, toUrl)
-  return result
+  const entry = fg.sync(resolve(pnpm, toUrl), {
+    cwd: pnpm,
+    absolute: true,
+    onlyDirectories: true,
+    dot: true,
+  })
+  if (entry.length)
+    return entry[0]
 }
 
 // todo: 判断是否是pnpm通过pnpm 组合命名xx+xx去找目录下的类型
@@ -105,13 +112,19 @@ export function findNodeModules(module: string, url: string, projectRoot = _proj
 
   if (!isDirectory(moduleFolder))
     moduleFolder = resolve(resolve(projectRoot, '.', 'node_modules'), '.', url)
+  else
+    return moduleFolder
 
   if (!isDirectory(moduleFolder))
     moduleFolder = toPnpmUrl(url) || moduleFolder
+  else
+    return moduleFolder
 
   // 从@types中获取
   if (!isDirectory(moduleFolder))
     moduleFolder = resolve(resolve(projectRoot, '.', 'node_modules/@types'), '.', url)
+  else
+    return moduleFolder
 
   if (!isDirectory(moduleFolder)) {
     // 判断当前是否是pnpm在子仓找依赖
@@ -128,6 +141,8 @@ export function findNodeModules(module: string, url: string, projectRoot = _proj
       moduleFolder = findNodeModules(module, url, workspace)
       if (!isDirectory(moduleFolder) && url.includes('/'))
         moduleFolder = findNodeModules(module, url.split('/').slice(0, -1).join('/'), workspace)
+      else
+        return moduleFolder
     }
   }
 
@@ -196,24 +211,55 @@ export function isDirectory(url: string) {
 const IMPORTREG = /import(\s+)from\s+['"]([^"']+)['"]/
 
 export function getImportSource(pos: Position) {
-  const text = getActiveText()!
+  const text = getActiveText()
+  if (!text)
+    return
   const isVue = getActiveTextEditorLanguageId() === 'vue'
-  const activeTextEditor = getActiveTextEditor()!
-  if (isVue) {
-    // 如果是vue就拿script
-    const offset = activeTextEditor.document.offsetAt(pos)
+  const activeTextEditor = getActiveTextEditor()
+  if (!activeTextEditor)
+    return
+  try {
+    if (isVue) {
+      // 如果是vue就拿script
+      const offset = activeTextEditor.document.offsetAt(pos)
 
-    for (const match of text.matchAll(/<script[^>]+>(.*)<\/script>/sg)) {
-      const [all, content] = match
-      const ast = parser(content)
+      for (const match of text.matchAll(/<script[^>]+>(.*)<\/script>/sg)) {
+        const [all, content] = match
+        const ast = parser(content)
 
-      const baseOffset = match.index! + all.indexOf(content)
+        const baseOffset = match.index! + all.indexOf(content)
+        for (const item of ast.program.body) {
+          // 需要计算一个新的loc
+          const start = item.loc!.start.index + baseOffset
+          const end = item.loc!.end.index + baseOffset
+          if (item.type === 'ImportDeclaration' && start < offset && end > offset) {
+            const imports = text.slice(item.start! + baseOffset, item.source.start! + baseOffset)
+            return {
+              imports,
+              source: item.source.value,
+              isInSource: isInPosition(item.source.loc!, pos),
+            }
+          }
+          continue
+        }
+      }
+      const lineText = getLineText(pos.line)?.trim()
+      if (!lineText)
+        return
+      const match = lineText.match(IMPORTREG)
+      if (!match)
+        return
+      return {
+        imports: match[0],
+        source: match[2],
+        isInSource: false,
+      }
+    }
+    else {
+      const ast = parser(text)
       for (const item of ast.program.body) {
-        // 需要计算一个新的loc
-        const start = item.loc!.start.index + baseOffset
-        const end = item.loc!.end.index + baseOffset
-        if (item.type === 'ImportDeclaration' && start < offset && end > offset) {
-          const imports = text.slice(item.start! + baseOffset, item.source.start! + baseOffset)
+        if (item.type === 'ImportDeclaration' && isInPosition(item.loc!, pos)) {
+          const imports = text.slice(item.start!, item.source.start!)
           return {
             imports,
             source: item.source.value,
@@ -222,42 +268,19 @@ export function getImportSource(pos: Position) {
         }
         continue
       }
-    }
-    const lineText = getLineText(pos.line)?.trim()
-    if (!lineText)
-      return
-    const match = lineText.match(IMPORTREG)
-    if (!match)
-      return
-    return {
-      imports: match[0],
-      source: match[2],
-      isInSource: false,
+      const lineText = getLineText(pos.line)?.trim()
+      if (!lineText)
+        return
+      const match = lineText.match(IMPORTREG)
+      if (!match)
+        return
+      return {
+        imports: match[0],
+        source: match[2],
+        isInSource: false,
+      }
     }
   }
-  else {
-    const ast = parser(text)
-    for (const item of ast.program.body) {
-      if (item.type === 'ImportDeclaration' && isInPosition(item.loc!, pos)) {
-        const imports = text.slice(item.start!, item.source.start!)
-        return {
-          imports,
-          source: item.source.value,
-          isInSource: isInPosition(item.source.loc!, pos),
-        }
-      }
-      continue
-    }
-    const lineText = getLineText(pos.line)?.trim()
-    if (!lineText)
-      return
-    const match = lineText.match(IMPORTREG)
-    if (!match)
-      return
-    return {
-      imports: match[0],
-      source: match[2],
-      isInSource: false,
-    }
+  catch (error) {
   }
 }

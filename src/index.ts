@@ -1,37 +1,49 @@
-import { createCompletionItem, getSelection, registerCompletionItemProvider } from '@vscode-use/utils'
+import { createCompletionItem, createExtension, getSelection, registerCompletionItemProvider, registerHoverProvider } from '@vscode-use/utils'
 import { isArray, toArray } from 'lazy-js-utils'
 import * as vscode from 'vscode'
-import type { ExtensionContext } from 'vscode'
 import type { ExportType } from './parse'
 import { getModule } from './parse'
 import { getImportSource } from './utils'
 
-export function activate(context: ExtensionContext) {
-  context.subscriptions.push(vscode.languages.registerHoverProvider('*', {
-    async provideHover(_, position) {
+export = createExtension(() => {
+  const filter = ['javascript', 'javascriptreact', 'typescript', 'typescriptreact', 'vue', 'svelte']
+  const typeCode: Record<string, number> = {
+    TSTypeAliasDeclaration: 24,
+    TSEnumDeclaration: 24,
+    ClassDeclaration: 6,
+    FunctionDeclaration: 2,
+    TSInterfaceDeclaration: 7,
+    Struct: 21,
+    VariableDeclaration: 5,
+    TSFunctionType: 24,
+    TSTypeLiteral: 24,
+    JSON: 0,
+  }
+
+  return [
+    registerHoverProvider('*',
+      async (_, position) => {
+        const source = getImportSource(position)
+        if (!source)
+          return
+
+        if (!source.isInSource)
+          return
+
+        const data = await getModule(source.source)
+        if (data)
+          return getHoverMd(data.exports)
+      }),
+    registerCompletionItemProvider(filter, async (_document, position) => {
       const source = getImportSource(position)
       if (!source)
         return
-
-      if (!source.isInSource)
-        return
-
       const data = await getModule(source.source)
+
       if (data)
-        return getHoverMd(data.exports)
-    },
-  }))
-
-  const filter = ['javascript', 'javascriptreact', 'typescript', 'typescriptreact', 'vue', 'svelte']
-  context.subscriptions.push(registerCompletionItemProvider(filter, async (_document, position) => {
-    const source = getImportSource(position)
-    if (!source)
-      return
-    const data = await getModule(source.source)
-
-    if (data)
-      return getCompletion(data.exports, source.imports)
-  }, [' ', ',']))
+        return getCompletion(data.exports, source.imports)
+    }, [' ', ',']),
+  ]
 
   function getHoverMd(exportData: ExportType[]) {
     const md = new vscode.MarkdownString()
@@ -42,7 +54,9 @@ export function activate(context: ExtensionContext) {
     exportData.sort(a =>
       a.type.includes('default') ? -1 : 1,
     ).forEach((data) => {
-      const { type, name, alias } = data
+      let { type, name, alias } = data
+      if (!name)
+        name = 'default'
       if (type.includes('default')) {
         const _type = type.find(i => i !== 'default')
         blocks.push('## Export Default')
@@ -61,19 +75,6 @@ export function activate(context: ExtensionContext) {
     md.appendMarkdown(blocks.join('\n\n'))
     if (blocks.length)
       return new vscode.Hover(md)
-  }
-
-  const typeCode: Record<string, number> = {
-    TSTypeAliasDeclaration: 24,
-    TSEnumDeclaration: 24,
-    ClassDeclaration: 6,
-    FunctionDeclaration: 2,
-    TSInterfaceDeclaration: 7,
-    Struct: 21,
-    VariableDeclaration: 5,
-    TSFunctionType: 24,
-    TSTypeLiteral: 24,
-    JSON: 0,
   }
 
   function getCompletion(exportData: ExportType[], currentModule: string) {
@@ -192,8 +193,4 @@ export function activate(context: ExtensionContext) {
         : [],
     ]
   }
-}
-
-export function deactivate() {
-
-}
+})
