@@ -3,7 +3,7 @@
   "name": "export-what",
   "displayName": "export-what",
   "version": "0.0.26",
-  "packageManager": "pnpm@8.1.1",
+  "packageManager": "pnpm@8.15.9",
   "description": "export-what",
   "author": "Simon He <https://github.com/Simon-He95>",
   "license": "MIT",
@@ -28,7 +28,7 @@
     "dist"
   ],
   "engines": {
-    "vscode": "^1.77.0"
+    "vscode": "^1.92.0"
   },
   "activationEvents": [
     "onStartupFinished"
@@ -38,30 +38,29 @@
     "test": "vitest",
     "build": "tsup src/index.ts --external vscode",
     "pack": "vsce package --no-dependencies",
-    "lint": "eslint . --ext .vue,.js,.ts,.jsx,.tsx,.md,.json --max-warnings 0 --cache",
-    "lint:fix": "eslint . --ext .vue,.js,.ts,.jsx,.tsx,.md,.json --max-warnings 0 --cache --fix",
+    "lint": "eslint . --cache",
+    "lint:fix": "pnpm lint --fix",
     "publish": "vsce publish --no-dependencies",
     "typecheck": "tsc --noEmit",
     "release": "bumpp && pnpm run publish"
   },
   "devDependencies": {
-    "@antfu/eslint-config": "^0.38.4",
-    "@babel/parser": "^7.23.4",
-    "@babel/types": "^7.23.4",
-    "@types/node": "^18.15.11",
-    "@types/vscode": "^1.77.0",
-    "@vscode-use/utils": "0.1.10-beta.1",
-    "bumpp": "^9.1.0",
-    "eslint": "^8.37.0",
+    "@antfu/eslint-config": "^2.25.1",
+    "@babel/parser": "^7.25.3",
+    "@babel/types": "^7.25.2",
+    "@types/node": "^18.19.44",
+    "@types/vscode": "^1.92.0",
+    "@vscode-use/utils": "0.1.18",
+    "bumpp": "^9.5.1",
+    "eslint": "^8.57.0",
     "esno": "^0.16.3",
     "fast-glob": "^3.3.2",
     "find-up": "^7.0.0",
-    "lazy-js-utils": "^0.0.85",
-    "pnpm": "^8.1.1",
+    "lazy-js-utils": "^0.0.99",
+    "pnpm": "^8.15.9",
     "rimraf": "^4.4.1",
     "tsup": "^6.7.0",
-    "typescript": "^5.0.3",
-    "vite": "^4.2.1",
+    "typescript": "^5.5.4",
     "vitest": "^0.29.8",
     "vsce": "^2.15.0"
   }

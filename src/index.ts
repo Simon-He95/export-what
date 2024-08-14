@@ -1,5 +1,5 @@
-import { createCompletionItem, createExtension, createHover, createMarkdownString, getSelection, registerCompletionItemProvider, registerHoverProvider } from '@vscode-use/utils'
-import { isArray, toArray } from 'lazy-js-utils'
+import { createCompletionItem, createExtension, createHover, createMarkdownString, createRange, getSelection, registerCompletionItemProvider, registerHoverProvider } from '@vscode-use/utils'
+import { hash, isArray, toArray } from 'lazy-js-utils'
 import * as vscode from 'vscode'
 import type { ExportType } from './parse'
 import { getModule } from './parse'
@@ -21,19 +21,18 @@ export = createExtension(() => {
   }
 
   return [
-    registerHoverProvider('*',
-      async (_, position) => {
-        const source = getImportSource(position)
-        if (!source)
-          return
+    registerHoverProvider('*', async (_, position) => {
+      const source = getImportSource(position)
+      if (!source)
+        return
 
-        if (!source.isInSource)
-          return
+      if (!source.isInSource)
+        return
 
-        const data = await getModule(source.source)
-        if (data)
-          return getHoverMd(data.exports)
-      }),
+      const data = await getModule(source.source)
+      if (data)
+        return getHoverMd(data.exports)
+    }),
     registerCompletionItemProvider(filter, async (_document, position) => {
       const source = getImportSource(position)
       if (!source)
@@ -78,7 +77,7 @@ export = createExtension(() => {
   }
 
   function getCompletion(exportData: ExportType[], currentModule: string) {
-    const match = currentModule.match(/{([^}]*)}/)
+    const match = currentModule.match(/\{([^}]*)\}/)
     const isTypeOnly = /^import\s+type/.test(currentModule)
     let has: string[] = []
     if (match) {
@@ -93,14 +92,24 @@ export = createExtension(() => {
         has.push(_default)
     }
 
-    const { character, lineText } = getSelection()!
+    const { character, lineText, line } = getSelection()!
     let set_exports_snippet = (v: string) => ` ${v}$1`
     let show_default = true
+    let range: any = createRange(line, character, line, character)
     if (match) {
       const start = lineText.indexOf(currentModule) + match.input!.indexOf(match[1])
-      const end = start + match[0].length - 1
+      const end = start + match[0].length
       if ((character < start) || (character > end)) {
         // 说明在 {}外
+        let pos = character - 1
+        const start = lineText.indexOf(currentModule) + match.index! + match[0].indexOf(match[1])
+        while (lineText[pos] === ' ' && pos > start)
+          pos--
+        range = createRange(line, pos + 1, line, character)
+        if (lineText[pos] === '}')
+          set_exports_snippet = (v: string) => `, ${v}$1`
+        // 只使用export default
+        exportData = exportData.filter(item => item.type.includes('default'))
       }
       else {
         show_default = false
@@ -109,7 +118,8 @@ export = createExtension(() => {
         while (lineText[pos] === ' ' && pos > start)
           pos--
 
-        if (lineText[pos] !== ' ' && (lineText[pos] !== ',' || lineText[pos] !== '{'))
+        range = createRange(line, pos + 1, line, character)
+        if (lineText[pos] !== ' ' && (lineText[pos] !== ',' && lineText[pos] !== '{'))
           set_exports_snippet = (v: string) => `, ${v}$1`
         else if (pos !== character - 1)
           set_exports_snippet = (v: string) => `${v}$1`
@@ -124,7 +134,7 @@ export = createExtension(() => {
         const start = lineText.indexOf(currentModule)
         while (lineText[pos] === ' ' && pos > start)
           pos--
-
+        range = createRange(line, pos + 1, line, character)
         if (pos === character - 1)
           set_exports_snippet = (v: string) => `{ ${v}$1 }`
         else if (lineText[pos] !== ',' && lineText.slice(Math.max(pos - 5, 0), pos + 1) !== 'import')
@@ -134,65 +144,135 @@ export = createExtension(() => {
       }
     }
 
+    const sortedExportData = exportData.filter(({ name }) => {
+      if (has.includes(name))
+        return false
+      return true
+    }).sort((bB: any, aA: any) => {
+      const typeA = aA.type
+      const typeB = bB.type
+      if (isTypeOnly) {
+        if (['TSInterfaceDeclaration', 'TSTypeAliasDeclaration', 'TSEnumDeclaration', 'TSFunctionType', 'TSTypeLiteral'].includes(typeA[0]) && !['TSInterfaceDeclaration', 'TSTypeAliasDeclaration', 'TSEnumDeclaration', 'TSFunctionType', 'TSTypeLiteral'].includes(typeB[0]))
+          return 1
+
+        if (!['TSInterfaceDeclaration', 'TSTypeAliasDeclaration', 'TSEnumDeclaration', 'TSFunctionType', 'TSTypeLiteral'].includes(typeA[0]) && ['TSInterfaceDeclaration', 'TSTypeAliasDeclaration', 'TSEnumDeclaration', 'TSFunctionType', 'TSTypeLiteral'].includes(typeB[0]))
+          return -1
+      }
+      else {
+        if (['TSInterfaceDeclaration', 'TSTypeAliasDeclaration', 'TSEnumDeclaration', 'TSFunctionType', 'TSTypeLiteral'].includes(typeA[0]) && !['TSInterfaceDeclaration', 'TSTypeAliasDeclaration', 'TSEnumDeclaration', 'TSFunctionType', 'TSTypeLiteral'].includes(typeB[0]))
+          return -1
+
+        if (!['TSInterfaceDeclaration', 'TSTypeAliasDeclaration', 'TSEnumDeclaration', 'TSFunctionType', 'TSTypeLiteral'].includes(typeA[0]) && ['TSInterfaceDeclaration', 'TSTypeAliasDeclaration', 'TSEnumDeclaration', 'TSFunctionType', 'TSTypeLiteral'].includes(typeB[0]))
+          return 1
+      }
+      const a = aA.name
+      const b = bB.name
+      const aLower = a.toLowerCase()
+      const bLower = b.toLowerCase()
+      if (a === aLower && b !== bLower)
+        return 1
+      if (a !== aLower && b === bLower)
+        return -1
+
+      if (a < b)
+        return -1
+      if (a > b)
+        return 1
+      return 0
+    })
+
     return [
-      ...exportData.filter(({ name }) => {
-        if (has.includes(name))
-          return false
-        return true
-      }).sort(a => (isTypeOnly && ['TSInterfaceDeclaration', 'TSTypeAliasDeclaration', 'TSEnumDeclaration', 'TSFunctionType', 'TSTypeLiteral'].includes(a.type[0])) ? -1 : 1).map(({ name, type, returnType, raw, params = '', optionsTypes }) => {
+      ...sortedExportData.map(({ name, type, returnType, raw, params = '', optionsTypes }, i) => {
         let _type: any = isArray(type) ? type.filter(t => t !== 'default') : [type]
         if (_type.length > 1)
           _type = _type.filter((t: string) => t !== 'Identifier')
-        const detail = `${params ? `参数：${params}` : ''}${returnType ? `\n\n返回类型：${returnType}` : ''}`
-
+        const detail = '导出方式: export'
         const documentation = new vscode.MarkdownString()
         documentation.isTrusted = true
         documentation.supportHtml = true
         const details = []
         optionsTypes = optionsTypes?.map(i => i.trim()).filter(Boolean)
-        details.push('## 导出方式')
-        details.push('```\nexport\n```')
         if (optionsTypes && optionsTypes.length) {
-          details.push('## 参数类型')
+          details.push('### 参数类型')
           details.push('```')
           details.push(...optionsTypes)
           details.push('```')
         }
         if (raw) {
-          details.push('## 定义')
+          details.push('### 定义')
           details.push(`\`\`\`\n${raw}\n\`\`\``)
         }
         documentation.appendMarkdown(details.join('\n\n'))
+        if (params) {
+          documentation.appendMarkdown('### 参数')
+          documentation.appendMarkdown('\n')
+          documentation.appendCodeblock(tidyUpType(params), 'typescript')
+        }
+        if (returnType) {
+          documentation.appendMarkdown('### 返回类型')
+          documentation.appendMarkdown('\n')
+          documentation.appendCodeblock(tidyUpType(returnType), 'typescript')
+        }
         _type = _type[0]
-        return createCompletionItem({ content: `$${name}  ->  ${type}`, sortText: '0', preselect: true, snippet: set_exports_snippet(name), type: typeCode[_type] ?? 8, detail, documentation })
+        return createCompletionItem({ content: `${name}  ->  ${type}`, sortText: String(i), preselect: true, snippet: set_exports_snippet(name), type: typeCode[_type] ?? 8, detail, range, documentation })
       }),
       ...show_default
         ? exportData.filter(({ type }) => type.includes('default')).map(({ name, raw, params, optionsTypes, returnType, type }) => {
           let _type: any = isArray(type) ? type.filter(t => t !== 'default') : type
           if (_type.length > 1)
             _type = _type.filter((t: string) => t !== 'Identifier')
-          const detail = `${params} ${returnType}`
+          const detail = '导出方式: export default'
 
           const documentation = createMarkdownString()
           documentation.isTrusted = true
           documentation.supportHtml = true
           const details = []
-          details.push('## 导出方式')
-          details.push('```\nexport default\n```')
           if (optionsTypes && optionsTypes.length) {
-            details.push('## 参数类型')
+            details.push('### 参数类型')
             details.push(...optionsTypes)
           }
           if (raw) {
-            details.push('## 定义')
+            details.push('### 定义')
             details.push(raw)
           }
           documentation.appendMarkdown(details.join('\n\n'))
 
+          if (params) {
+            documentation.appendMarkdown('### 参数')
+            documentation.appendMarkdown('\n')
+            documentation.appendCodeblock(tidyUpType(params), 'typescript')
+          }
+          if (returnType) {
+            documentation.appendMarkdown('### 返回类型')
+            documentation.appendMarkdown('\n')
+            documentation.appendCodeblock(tidyUpType(returnType), 'typescript')
+          }
+
           _type = _type[0]
-          return createCompletionItem({ content: `$${name}  ->  ${type}`, snippet: name, type: typeCode[_type] ?? 5, detail, documentation, sortText: '0', filterText: '$', preselect: true })
+          return createCompletionItem({ content: `${name}  ->  ${type}`, snippet: name, type: typeCode[_type] ?? 5, detail, documentation, sortText: '0', range, preselect: true })
         })
         : [],
     ]
   }
 })
+
+function tidyUpType(str: string) {
+  const transformedMap = new Map()
+  str = str.replace(/<[^>]+>/g, (match) => {
+    const _hash = hash(match)
+    transformedMap.set(hash, match)
+    return _hash
+  }).replace(/, /g, ',\n')
+    .split(' | ')
+    .join('\n| ')
+    .split('>,')
+    .join('>,\n ')
+    .split(' ? ')
+    .join('\n? ')
+    .split(' : ')
+    .join('\n: ')
+  Array.from(transformedMap.entries()).forEach((v, k) => {
+    str = str.replaceAll(k, v)
+  })
+  return str
+}

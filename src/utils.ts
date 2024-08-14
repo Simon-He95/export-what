@@ -8,7 +8,7 @@ import { findUpSync } from 'find-up'
 import fg from 'fast-glob'
 import { parser } from './parse'
 
-const LOCAL_URL_REG = /^(\.|\/|\@\/)/
+const LOCAL_URL_REG = /^(?:\.|\/|@\/)/
 
 const _projectRoot = workspace.workspaceFolders![0].uri.fsPath
 const suffix = ['.ts', '.js', '.tsx', '.jsx']
@@ -227,7 +227,7 @@ export function getImportSource(pos: Position) {
       // 如果是vue就拿script
       const offset = activeTextEditor.document.offsetAt(pos)
 
-      for (const match of text.matchAll(/<script[^>]+>(.*)<\/script>/sg)) {
+      for (const match of text.matchAll(/<script[^>]+>(.*)<\/script>/gs)) {
         const [all, content] = match
         const ast = parser(content)
 
