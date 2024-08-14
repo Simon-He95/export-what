@@ -96,6 +96,9 @@ export function toAbsoluteUrl(url: string, module = '', currentFileUrl = getCurr
               main = ts
           }
         }
+        else if (existsSync(resolve(moduleFolder, `${moduleName}.d.ts`))) {
+          return { url: resolve(moduleFolder, `${moduleName}.d.ts`), moduleFolder }
+        }
       }
       if (!main)
         main = pkg.types || pkg.typings || pkg.module || pkg.main || pkg?.exports?.types || pkg?.exports?.default
@@ -105,28 +108,29 @@ export function toAbsoluteUrl(url: string, module = '', currentFileUrl = getCurr
 }
 
 const workspaceCache = new Set()
+function isTarget(moduleFolder: string) {
+  return isDirectory(moduleFolder) && existsSync(resolve(moduleFolder, './package.json'))
+}
 export function findNodeModules(module: string, url: string, projectRoot = _projectRoot) {
   let moduleFolder = ''
   if (module)
     moduleFolder = resolve(module, '.', url)
 
-  if (!isDirectory(moduleFolder))
-    moduleFolder = resolve(resolve(projectRoot, '.', 'node_modules'), '.', url)
-  else
+  if (isTarget(moduleFolder))
     return moduleFolder
 
-  if (!isDirectory(moduleFolder))
-    moduleFolder = toPnpmUrl(url) || moduleFolder
-  else
+  moduleFolder = resolve(resolve(projectRoot, '.', 'node_modules'), '.', url)
+
+  if (isTarget(moduleFolder))
     return moduleFolder
+  moduleFolder = toPnpmUrl(url) || moduleFolder
 
   // 从@types中获取
-  if (!isDirectory(moduleFolder))
-    moduleFolder = resolve(resolve(projectRoot, '.', 'node_modules/@types'), '.', url)
-  else
+  if (isTarget(moduleFolder))
     return moduleFolder
+  moduleFolder = resolve(resolve(projectRoot, '.', 'node_modules/@types'), '.', url)
 
-  if (!isDirectory(moduleFolder)) {
+  if (!isTarget(moduleFolder)) {
     // 判断当前是否是pnpm在子仓找依赖
     const currentFileUrl = getCurrentFileUrl()!
     const _workspace = findUpSync('node_modules', {
@@ -146,7 +150,7 @@ export function findNodeModules(module: string, url: string, projectRoot = _proj
     }
   }
 
-  if (!isDirectory(moduleFolder) && url.includes('/')) {
+  if (!isTarget(moduleFolder) && url.includes('/')) {
     // 考虑只匹配前面再从exports中匹配后半部份
     moduleFolder = findNodeModules(module, url.split('/').slice(0, -1).join('/'))
   }

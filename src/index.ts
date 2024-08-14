@@ -1,4 +1,4 @@
-import { createCompletionItem, createExtension, getSelection, registerCompletionItemProvider, registerHoverProvider } from '@vscode-use/utils'
+import { createCompletionItem, createExtension, createHover, createMarkdownString, getSelection, registerCompletionItemProvider, registerHoverProvider } from '@vscode-use/utils'
 import { isArray, toArray } from 'lazy-js-utils'
 import * as vscode from 'vscode'
 import type { ExportType } from './parse'
@@ -46,7 +46,7 @@ export = createExtension(() => {
   ]
 
   function getHoverMd(exportData: ExportType[]) {
-    const md = new vscode.MarkdownString()
+    const md = createMarkdownString()
     md.isTrusted = true
     md.supportHtml = true
     const blocks: string[] = []
@@ -74,12 +74,12 @@ export = createExtension(() => {
 
     md.appendMarkdown(blocks.join('\n\n'))
     if (blocks.length)
-      return new vscode.Hover(md)
+      return createHover(md)
   }
 
   function getCompletion(exportData: ExportType[], currentModule: string) {
     const match = currentModule.match(/{([^}]*)}/)
-    const isTypeOnly = currentModule.startsWith('type')
+    const isTypeOnly = /^import\s+type/.test(currentModule)
     let has: string[] = []
     if (match) {
       has = match[1].replace(/\s/g, '').split(',').filter(Boolean)
@@ -109,7 +109,7 @@ export = createExtension(() => {
         while (lineText[pos] === ' ' && pos > start)
           pos--
 
-        if (lineText[pos] !== ' ' && lineText[pos] !== ',')
+        if (lineText[pos] !== ' ' && (lineText[pos] !== ',' || lineText[pos] !== '{'))
           set_exports_snippet = (v: string) => `, ${v}$1`
         else if (pos !== character - 1)
           set_exports_snippet = (v: string) => `${v}$1`
@@ -125,23 +125,21 @@ export = createExtension(() => {
         while (lineText[pos] === ' ' && pos > start)
           pos--
 
-        if (lineText[pos] !== ',' && lineText.slice(Math.max(pos - 5, 0), pos + 1) !== 'import')
-          set_exports_snippet = (v: string) => `, { ${v}$1 }`
-        else if (pos !== character - 1)
+        if (pos === character - 1)
           set_exports_snippet = (v: string) => `{ ${v}$1 }`
+        else if (lineText[pos] !== ',' && lineText.slice(Math.max(pos - 5, 0), pos + 1) !== 'import')
+          set_exports_snippet = (v: string) => `, { ${v}$1 }`
         else
           set_exports_snippet = (v: string) => ` { ${v}$1 }`
       }
     }
 
     return [
-      ...exportData.filter(({ name, type }) => {
+      ...exportData.filter(({ name }) => {
         if (has.includes(name))
           return false
-        if (isTypeOnly && !['TSInterfaceDeclaration', 'TSTypeAliasDeclaration', 'TSEnumDeclaration', 'TSFunctionType', 'TSTypeLiteral'].includes(type[0]))
-          return false
         return true
-      }).map(({ name, type, returnType, raw, params = '', optionsTypes }) => {
+      }).sort(a => (isTypeOnly && ['TSInterfaceDeclaration', 'TSTypeAliasDeclaration', 'TSEnumDeclaration', 'TSFunctionType', 'TSTypeLiteral'].includes(a.type[0])) ? -1 : 1).map(({ name, type, returnType, raw, params = '', optionsTypes }) => {
         let _type: any = isArray(type) ? type.filter(t => t !== 'default') : [type]
         if (_type.length > 1)
           _type = _type.filter((t: string) => t !== 'Identifier')
@@ -152,6 +150,8 @@ export = createExtension(() => {
         documentation.supportHtml = true
         const details = []
         optionsTypes = optionsTypes?.map(i => i.trim()).filter(Boolean)
+        details.push('## 导出方式')
+        details.push('```\nexport\n```')
         if (optionsTypes && optionsTypes.length) {
           details.push('## 参数类型')
           details.push('```')
@@ -164,7 +164,7 @@ export = createExtension(() => {
         }
         documentation.appendMarkdown(details.join('\n\n'))
         _type = _type[0]
-        return createCompletionItem({ content: `Export: ${name}  ->  ${type}`, snippet: set_exports_snippet(name), type: typeCode[_type] ?? 8, detail, documentation })
+        return createCompletionItem({ content: `$${name}  ->  ${type}`, sortText: '0', preselect: true, snippet: set_exports_snippet(name), type: typeCode[_type] ?? 8, detail, documentation })
       }),
       ...show_default
         ? exportData.filter(({ type }) => type.includes('default')).map(({ name, raw, params, optionsTypes, returnType, type }) => {
@@ -173,10 +173,12 @@ export = createExtension(() => {
             _type = _type.filter((t: string) => t !== 'Identifier')
           const detail = `${params} ${returnType}`
 
-          const documentation = new vscode.MarkdownString()
+          const documentation = createMarkdownString()
           documentation.isTrusted = true
           documentation.supportHtml = true
           const details = []
+          details.push('## 导出方式')
+          details.push('```\nexport default\n```')
           if (optionsTypes && optionsTypes.length) {
             details.push('## 参数类型')
             details.push(...optionsTypes)
@@ -188,7 +190,7 @@ export = createExtension(() => {
           documentation.appendMarkdown(details.join('\n\n'))
 
           _type = _type[0]
-          return createCompletionItem({ content: `Export Default: ${name}  ->  ${type}`, snippet: name, type: typeCode[_type] ?? 5, detail, documentation, sortText: '0', preselect: true })
+          return createCompletionItem({ content: `$${name}  ->  ${type}`, snippet: name, type: typeCode[_type] ?? 5, detail, documentation, sortText: '0', filterText: '$', preselect: true })
         })
         : [],
     ]
