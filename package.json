@@ -2,7 +2,7 @@
   "publisher": "simonhe",
   "name": "export-what",
   "displayName": "export-what",
-  "version": "0.0.27",
+  "version": "0.0.28",
   "packageManager": "pnpm@8.15.9",
   "description": "export-what",
   "author": "Simon He <https://github.com/Simon-He95>",
