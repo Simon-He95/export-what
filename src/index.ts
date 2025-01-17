@@ -257,10 +257,11 @@ export = createExtension(() => {
 })
 
 function tidyUpType(str: string) {
-  const transformedMap = new Map()
+  const transformedMap = new Map<string, string>()
+  let i = 0
   str = str.replace(/<[^>]+>/g, (match) => {
-    const _hash = hash(match)
-    transformedMap.set(hash, match)
+    const _hash = hash(match) + i++
+    transformedMap.set(_hash, match)
     return _hash
   }).replace(/, /g, ',\n')
     .split(' | ')
@@ -271,7 +272,7 @@ function tidyUpType(str: string) {
     .join('\n? ')
     .split(' : ')
     .join('\n: ')
-  Array.from(transformedMap.entries()).forEach((v, k) => {
+  Array.from(transformedMap.entries()).forEach(([k, v]) => {
     str = str.replaceAll(k, v)
   })
   return str

@@ -24,9 +24,6 @@
   ],
   "main": "./dist/index.js",
   "icon": "icon.png",
-  "files": [
-    "dist"
-  ],
   "engines": {
     "vscode": "^1.92.0"
   },
@@ -50,18 +47,18 @@
     "@babel/types": "^7.25.2",
     "@types/node": "^18.19.44",
     "@types/vscode": "^1.92.0",
-    "@vscode-use/utils": "0.1.18",
+    "@vscode-use/utils": "0.1.39",
     "bumpp": "^9.5.1",
     "eslint": "^8.57.0",
     "esno": "^0.16.3",
     "fast-glob": "^3.3.2",
     "find-up": "^7.0.0",
-    "lazy-js-utils": "^0.0.99",
+    "lazy-js-utils": "^0.1.28",
     "pnpm": "^8.15.9",
     "rimraf": "^4.4.1",
     "tsup": "^6.7.0",
     "typescript": "^5.5.4",
     "vitest": "^0.29.8",
-    "vsce": "^2.15.0"
+    "@vscode/vsce": "^3.2.1"
   }
 }
