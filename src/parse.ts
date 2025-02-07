@@ -1,5 +1,5 @@
-import fs, { existsSync } from 'node:fs'
 import type { ParserOptions } from '@babel/parser'
+import fs, { existsSync } from 'node:fs'
 import { parse } from '@babel/parser'
 import {
   isArrowFunctionExpression,
@@ -66,8 +66,8 @@ interface ScopedType {
 const urlMap = new Map()
 const codeMap = new Map()
 
-export function getModule(url: string, onlyExports = false, moduleFolder?: string, currentUrl?: string) {
-  const urlInfo = toAbsoluteUrl(url, moduleFolder, currentUrl)!
+export async function getModule(url: string, onlyExports = false, moduleFolder?: string, currentUrl?: string) {
+  const urlInfo = await toAbsoluteUrl(url, moduleFolder, currentUrl)!
   if (!urlInfo)
     return
   const { url: _url, moduleFolder: _moduleFolder } = urlInfo
@@ -343,7 +343,7 @@ export function getModule(url: string, onlyExports = false, moduleFolder?: strin
         }
       }
       else if (isExportAllDeclaration(node)) {
-        const _exports = getModule(node.source.value, false, _moduleFolder, url)!.exports
+        const _exports = (await getModule(node.source.value, false, _moduleFolder, url))!.exports
         if (_exports)
           exports.push(..._exports)
       }
@@ -472,15 +472,15 @@ export function getModule(url: string, onlyExports = false, moduleFolder?: strin
       // debugger
     }
   }
-  exports = exports.map((item) => {
-    const result = findTarget(scoped, imports, item.name, moduleFolder, url) || item
+  exports = await Promise.all(exports.map(async (item) => {
+    const result = await findTarget(scoped, imports, item.name, moduleFolder, url) || item
 
     if (item.alias) {
       result.returnType = result.returnType?.replace(result.name, item.alias) || ''
       result.name = item.alias
     }
     return result
-  }) as ExportType[]
+  })) as ExportType[]
 
   const result = {
     exports,
@@ -492,7 +492,7 @@ export function getModule(url: string, onlyExports = false, moduleFolder?: strin
   return result
 }
 
-function findTarget(scoped: ScopedType[], imports: ImportType[], name: string, moduleFolder?: string, currentUrl?: string) {
+async function findTarget(scoped: ScopedType[], imports: ImportType[], name: string, moduleFolder?: string, currentUrl?: string) {
   const target = scoped.find(s => s.name === name)
   if (target && target.type !== 'Identifier')
     return target
@@ -502,7 +502,7 @@ function findTarget(scoped: ScopedType[], imports: ImportType[], name: string, m
 
   const importTarget = imports.find(i => (i.alias || i.name) === name)
   if (importTarget) {
-    const module = getModule(importTarget.source, false, moduleFolder, currentUrl)
+    const module = await getModule(importTarget.source, false, moduleFolder, currentUrl)
     if (!module)
       return target
     const { exports } = module

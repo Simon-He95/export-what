@@ -1,11 +1,11 @@
-import { resolve } from 'node:path'
-import { existsSync, promises, readFileSync, statSync } from 'node:fs'
-import { workspace } from 'vscode'
 import type { Position } from 'vscode'
-import { isArray, useJSONParse } from 'lazy-js-utils'
+import { existsSync, promises, readFileSync, statSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { getActiveText, getActiveTextEditor, getActiveTextEditorLanguageId, getCurrentFileUrl, getLineText, isInPosition } from '@vscode-use/utils'
-import { findUpSync } from 'find-up'
 import fg from 'fast-glob'
+import { findUp } from 'find-up'
+import { isArray, useJSONParse } from 'lazy-js-utils'
+import { workspace } from 'vscode'
 import { parser } from './parse'
 
 const LOCAL_URL_REG = /^(?:\.|\/|@\/)/
@@ -40,7 +40,7 @@ export function toPnpmUrl(url: string) {
 }
 
 // todo: 判断是否是pnpm通过pnpm 组合命名xx+xx去找目录下的类型
-export function toAbsoluteUrl(url: string, module = '', currentFileUrl = getCurrentFileUrl()!) {
+export async function toAbsoluteUrl(url: string, module = '', currentFileUrl = getCurrentFileUrl()!) {
   // 判断是否是node_modules or 相对路径
   if (LOCAL_URL_REG.test(url)) {
     let isUseAlia = false
@@ -74,7 +74,7 @@ export function toAbsoluteUrl(url: string, module = '', currentFileUrl = getCurr
     }
   }
   else {
-    const moduleFolder = findNodeModules(module, url)
+    const moduleFolder = await findNodeModules(module, url)
 
     if (moduleFolder) {
       const _url = resolve(moduleFolder, '.', 'package.json')
@@ -111,7 +111,7 @@ const workspaceCache = new Set()
 function isTarget(moduleFolder: string) {
   return isDirectory(moduleFolder) && existsSync(resolve(moduleFolder, './package.json'))
 }
-export function findNodeModules(module: string, url: string, projectRoot = _projectRoot) {
+export async function findNodeModules(module: string, url: string, projectRoot = _projectRoot) {
   let moduleFolder = ''
   if (module)
     moduleFolder = resolve(module, '.', url)
@@ -133,7 +133,7 @@ export function findNodeModules(module: string, url: string, projectRoot = _proj
   if (!isTarget(moduleFolder)) {
     // 判断当前是否是pnpm在子仓找依赖
     const currentFileUrl = getCurrentFileUrl()!
-    const _workspace = findUpSync('node_modules', {
+    const _workspace = await findUp('node_modules', {
       cwd: currentFileUrl,
       stopAt: _projectRoot,
       type: 'directory',
@@ -142,9 +142,9 @@ export function findNodeModules(module: string, url: string, projectRoot = _proj
     if (_workspace && !workspaceCache.has(_workspace)) {
       workspaceCache.add(_workspace)
       const workspace = resolve(_workspace, '..')
-      moduleFolder = findNodeModules(module, url, workspace)
+      moduleFolder = await findNodeModules(module, url, workspace)
       if (!isDirectory(moduleFolder) && url.includes('/'))
-        moduleFolder = findNodeModules(module, url.split('/').slice(0, -1).join('/'), workspace)
+        moduleFolder = await findNodeModules(module, url.split('/').slice(0, -1).join('/'), workspace)
       else
         return moduleFolder
     }
@@ -152,7 +152,7 @@ export function findNodeModules(module: string, url: string, projectRoot = _proj
 
   if (!isTarget(moduleFolder) && url.includes('/')) {
     // 考虑只匹配前面再从exports中匹配后半部份
-    moduleFolder = findNodeModules(module, url.split('/').slice(0, -1).join('/'))
+    moduleFolder = await findNodeModules(module, url.split('/').slice(0, -1).join('/'))
   }
 
   return moduleFolder

@@ -1,7 +1,7 @@
+import type { ExportType } from './parse'
 import { createCompletionItem, createExtension, createHover, createMarkdownString, createRange, getSelection, registerCompletionItemProvider, registerHoverProvider } from '@vscode-use/utils'
 import { hash, isArray, toArray } from 'lazy-js-utils'
 import * as vscode from 'vscode'
-import type { ExportType } from './parse'
 import { getModule } from './parse'
 import { getImportSource } from './utils'
 
@@ -20,29 +20,27 @@ export = createExtension(() => {
     JSON: 0,
   }
 
-  return [
-    registerHoverProvider('*', async (_, position) => {
-      const source = getImportSource(position)
-      if (!source)
-        return
+  registerHoverProvider('*', async (_, position) => {
+    const source = getImportSource(position)
+    if (!source)
+      return
 
-      if (!source.isInSource)
-        return
+    if (!source.isInSource)
+      return
 
-      const data = await getModule(source.source)
-      if (data)
-        return getHoverMd(data.exports)
-    }),
-    registerCompletionItemProvider(filter, async (_document, position) => {
-      const source = getImportSource(position)
-      if (!source)
-        return
-      const data = await getModule(source.source)
+    const data = await getModule(source.source)
+    if (data)
+      return getHoverMd(data.exports)
+  })
+  registerCompletionItemProvider(filter, async (_document, position) => {
+    const source = getImportSource(position)
+    if (!source)
+      return
+    const data = await getModule(source.source)
 
-      if (data)
-        return getCompletion(data.exports, source.imports)
-    }, [' ', ',']),
-  ]
+    if (data)
+      return getCompletion(data.exports, source.imports)
+  }, [' ', ','])
 
   function getHoverMd(exportData: ExportType[]) {
     const md = createMarkdownString()
@@ -218,39 +216,39 @@ export = createExtension(() => {
       }),
       ...show_default
         ? exportData.filter(({ type }) => type.includes('default')).map(({ name, raw, params, optionsTypes, returnType, type }) => {
-          let _type: any = isArray(type) ? type.filter(t => t !== 'default') : type
-          if (_type.length > 1)
-            _type = _type.filter((t: string) => t !== 'Identifier')
-          const detail = '导出方式: export default'
+            let _type: any = isArray(type) ? type.filter(t => t !== 'default') : type
+            if (_type.length > 1)
+              _type = _type.filter((t: string) => t !== 'Identifier')
+            const detail = '导出方式: export default'
 
-          const documentation = createMarkdownString()
-          documentation.isTrusted = true
-          documentation.supportHtml = true
-          const details = []
-          if (optionsTypes && optionsTypes.length) {
-            details.push('### 参数类型')
-            details.push(...optionsTypes)
-          }
-          if (raw) {
-            details.push('### 定义')
-            details.push(raw)
-          }
-          documentation.appendMarkdown(details.join('\n\n'))
+            const documentation = createMarkdownString()
+            documentation.isTrusted = true
+            documentation.supportHtml = true
+            const details = []
+            if (optionsTypes && optionsTypes.length) {
+              details.push('### 参数类型')
+              details.push(...optionsTypes)
+            }
+            if (raw) {
+              details.push('### 定义')
+              details.push(raw)
+            }
+            documentation.appendMarkdown(details.join('\n\n'))
 
-          if (params) {
-            documentation.appendMarkdown('### 参数')
-            documentation.appendMarkdown('\n')
-            documentation.appendCodeblock(tidyUpType(params), 'typescript')
-          }
-          if (returnType) {
-            documentation.appendMarkdown('### 返回类型')
-            documentation.appendMarkdown('\n')
-            documentation.appendCodeblock(tidyUpType(returnType), 'typescript')
-          }
+            if (params) {
+              documentation.appendMarkdown('### 参数')
+              documentation.appendMarkdown('\n')
+              documentation.appendCodeblock(tidyUpType(params), 'typescript')
+            }
+            if (returnType) {
+              documentation.appendMarkdown('### 返回类型')
+              documentation.appendMarkdown('\n')
+              documentation.appendCodeblock(tidyUpType(returnType), 'typescript')
+            }
 
-          _type = _type[0]
-          return createCompletionItem({ content: `${name}  ->  ${type}`, snippet: name, type: typeCode[_type] ?? 5, detail, documentation, sortText: '0', range, preselect: true })
-        })
+            _type = _type[0]
+            return createCompletionItem({ content: `${name}  ->  ${type}`, snippet: name, type: typeCode[_type] ?? 5, detail, documentation, sortText: '0', range, preselect: true })
+          })
         : [],
     ]
   }
@@ -263,15 +261,7 @@ function tidyUpType(str: string) {
     const _hash = hash(match) + i++
     transformedMap.set(_hash, match)
     return _hash
-  }).replace(/, /g, ',\n')
-    .split(' | ')
-    .join('\n| ')
-    .split('>,')
-    .join('>,\n ')
-    .split(' ? ')
-    .join('\n? ')
-    .split(' : ')
-    .join('\n: ')
+  }).replace(/, /g, ',\n').split(' | ').join('\n| ').split('>,').join('>,\n ').split(' ? ').join('\n? ').split(' : ').join('\n: ')
   Array.from(transformedMap.entries()).forEach(([k, v]) => {
     str = str.replaceAll(k, v)
   })
