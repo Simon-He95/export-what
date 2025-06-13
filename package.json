@@ -41,20 +41,20 @@
     "release": "bumpp && pnpm run publish"
   },
   "devDependencies": {
-    "@antfu/eslint-config": "^4.1.1",
-    "@babel/parser": "^7.25.3",
-    "@babel/types": "^7.25.2",
-    "@types/node": "^18.19.44",
+    "@antfu/eslint-config": "^4.14.1",
+    "@babel/parser": "^7.27.5",
+    "@babel/types": "^7.27.6",
+    "@types/node": "^18.19.111",
     "@types/vscode": "1.77.0",
     "@vscode-use/utils": "0.1.39",
-    "@vscode/vsce": "^3.2.1",
-    "bumpp": "^9.5.1",
-    "eslint": "^9.19.0",
-    "fast-glob": "^3.3.2",
+    "@vscode/vsce": "^3.5.0",
+    "bumpp": "^9.11.1",
+    "eslint": "^9.28.0",
+    "fast-glob": "^3.3.3",
     "find-up": "^7.0.0",
-    "lazy-js-utils": "^0.1.28",
+    "lazy-js-utils": "^0.1.44",
     "tsup": "^6.7.0",
-    "typescript": "^5.5.4",
+    "typescript": "^5.8.3",
     "vitest": "^0.29.8"
   }
 }
