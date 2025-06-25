@@ -270,6 +270,14 @@ export function getImportSource(pos: Position) {
             isInSource: isInPosition(item.source.loc!, pos),
           }
         }
+        else if (item.type === 'VariableDeclaration' && item.declarations[0].type === 'VariableDeclarator' && item.declarations[0].init?.type === 'CallExpression' && item.declarations[0].init.callee.type === 'Identifier' && item.declarations[0].init.arguments[0].type === 'StringLiteral' && item.declarations[0].init.callee.name === 'require' && isInPosition(item.declarations[0].loc as any, pos)) {
+          const imports = text.slice(item.declarations[0].id.start!, item.declarations[0].id.end!)
+          return {
+            imports,
+            source: item.declarations[0].init.arguments[0].value,
+            isInSource: isInPosition(item.declarations[0].init.arguments[0].loc!, pos),
+          }
+        }
         continue
       }
       const lineText = getLineText(pos.line)?.trim()

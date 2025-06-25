@@ -3,16 +3,21 @@ import fs, { existsSync } from 'node:fs'
 import { parse } from '@babel/parser'
 import {
   isArrowFunctionExpression,
+  isAssignmentExpression,
   isClassDeclaration,
   isExportAllDeclaration,
   isExportDefaultDeclaration,
   isExportNamedDeclaration,
   isExportSpecifier,
+  isExpressionStatement,
   isFunctionDeclaration,
   isIdentifier,
   isImportDeclaration,
   isImportDefaultSpecifier,
   isImportSpecifier,
+  isMemberExpression,
+  isObjectExpression,
+  isObjectProperty,
   isTSDeclareFunction,
   isTSEnumDeclaration,
   isTSInterfaceDeclaration,
@@ -293,6 +298,19 @@ export async function getModule(url: string, onlyExports = false, moduleFolder?:
             name,
             type: ['Identifier', 'default'],
           })
+        }
+      }
+      else if (isExpressionStatement(node) && isAssignmentExpression(node.expression) && isMemberExpression(node.expression.left) && isIdentifier(node.expression.left.object) && node.expression.left.object.name === 'module') {
+        if (isObjectExpression(node.expression.right)) {
+          if (isObjectProperty(node.expression.right.properties[0])) {
+            if (isIdentifier(node.expression.right.properties[0].key)) {
+              const name = node.expression.right.properties[0].key.name
+              exports.push({
+                name,
+                type: ['Identifier', 'require'],
+              })
+            }
+          }
         }
       }
       else if (isFunctionDeclaration(node)) {

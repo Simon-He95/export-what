@@ -1,6 +1,6 @@
 import type { ExportType } from './parse'
 import { createCompletionItem, createExtension, createHover, createMarkdownString, createRange, getSelection, registerCompletionItemProvider, registerHoverProvider } from '@vscode-use/utils'
-import { hash, isArray, toArray } from 'lazy-js-utils'
+import { hash, isArray, toArray, uniqueArray } from 'lazy-js-utils'
 import * as vscode from 'vscode'
 import { getModule } from './parse'
 import { getImportSource } from './utils'
@@ -39,7 +39,7 @@ export = createExtension(() => {
     const data = await getModule(source.source)
 
     if (data)
-      return getCompletion(data.exports, source.imports)
+      return getCompletion(uniqueArray(data.exports), source.imports)
   }, [' ', ','])
 
   function getHoverMd(exportData: ExportType[]) {
