@@ -3,7 +3,9 @@ import { createCompletionItem, createExtension, createHover, createMarkdownStrin
 import { hash, isArray, toArray, uniqueArray } from 'lazy-js-utils'
 import * as vscode from 'vscode'
 import { getModule } from './parse'
+import { setEnabled as setLoggerEnabled } from './logger'
 import { getImportSource } from './utils'
+import { invalidateCacheByUrl } from './parse'
 
 export = createExtension(() => {
   const filter = ['javascript', 'javascriptreact', 'typescript', 'typescriptreact', 'vue', 'svelte']
@@ -32,6 +34,36 @@ export = createExtension(() => {
     if (data)
       return getHoverMd(data.exports)
   })
+  // enable debug logging based on workspace configuration (if running in vscode)
+  try {
+    const config = vscode.workspace.getConfiguration?.('export-what')
+    const debug = config?.get?.('debug')
+    setLoggerEnabled(!!debug)
+  }
+  catch (e) {
+    // ignore when not running in vscode
+  }
+  // Keep parse caches fresh: invalidate when files change or are saved.
+  try {
+    // onDidSaveTextDocument triggers when a file is saved
+    vscode.workspace.onDidSaveTextDocument((doc) => {
+      invalidateCacheByUrl(doc.uri.fsPath)
+    })
+
+    // onDidChangeTextDocument triggers on edits in the editor
+    vscode.workspace.onDidChangeTextDocument((e) => {
+      invalidateCacheByUrl(e.document.uri.fsPath)
+    })
+
+    // file system watcher for create/change/delete to be thorough
+    const watcher = vscode.workspace.createFileSystemWatcher('**/*.{ts,js,tsx,jsx,json}')
+    watcher.onDidChange((uri) => invalidateCacheByUrl(uri.fsPath))
+    watcher.onDidCreate((uri) => invalidateCacheByUrl(uri.fsPath))
+    watcher.onDidDelete((uri) => invalidateCacheByUrl(uri.fsPath))
+  }
+  catch (e) {
+    // ignore in non-vscode contexts
+  }
   registerCompletionItemProvider(filter, async (_document, position) => {
     const source = getImportSource(position)
     if (!source)

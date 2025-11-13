@@ -5,17 +5,40 @@ import { getActiveText, getActiveTextEditor, getActiveTextEditorLanguageId, getC
 import fg from 'fast-glob'
 import { findUp } from 'find-up'
 import { isArray, useJSONParse } from 'lazy-js-utils'
-import { workspace } from 'vscode'
 import { parser } from './parse'
+import { debug } from './logger'
 
 const LOCAL_URL_REG = /^(?:\.|\/|@\/)/
 
-const _projectRoot = workspace.workspaceFolders![0].uri.fsPath
+// Determine project root. Avoid top-level static import of `vscode` so tests and
+// non-VS Code contexts don't fail. Fall back to `process.cwd()` when not
+// available.
+let _projectRoot: string
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const vscode = require('vscode') as any
+  _projectRoot = (vscode && vscode.workspace && vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length)
+    ? vscode.workspace.workspaceFolders[0].uri.fsPath
+    : process.cwd()
+}
+catch (e) {
+  _projectRoot = process.cwd()
+}
 const suffix = ['.ts', '.js', '.tsx', '.jsx']
-export let alias: any = null
+export let alias: Record<string, string> | null = null
 
-if (!alias)
-  getAlias().then(data => alias = data)
+/**
+ * Ensure alias mapping is loaded. This avoids a race where resolution runs
+ * before the initial async load completes. Callers can `await ensureAlias()`.
+ */
+export async function ensureAlias() {
+  if (alias)
+    return alias
+  // getAlias may return undefined
+  const data = await getAlias()
+  alias = (data as Record<string, string>) || null
+  return alias
+}
 
 export function toPnpmUrl(url: string) {
   const pnpm = resolve(_projectRoot, 'node_modules/.pnpm')
@@ -45,11 +68,13 @@ export async function toAbsoluteUrl(url: string, module = '', currentFileUrl = g
   if (LOCAL_URL_REG.test(url)) {
     let isUseAlia = false
 
-    if (alias) {
-      Object.keys(alias).forEach((alia) => {
+    // ensure alias mapping is loaded lazily to avoid race conditions
+    const aliasMap = await ensureAlias()
+    if (aliasMap) {
+      Object.keys(aliasMap).forEach((alia) => {
         url = url.replace(alia, () => {
           isUseAlia = true
-          return alias[alia]
+          return aliasMap[alia]
         })
       })
     }
@@ -294,5 +319,6 @@ export function getImportSource(pos: Position) {
     }
   }
   catch (error) {
+    debug('getImportSource error', (error && (error as any).message) || error)
   }
 }

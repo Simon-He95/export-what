@@ -27,6 +27,7 @@ import {
   isVariableDeclarator,
 } from '@babel/types'
 import { toAbsoluteUrl } from './utils'
+import { debug } from './logger'
 
 export function parser(code: string) {
   const finalOptions: ParserOptions = {
@@ -70,6 +71,25 @@ interface ScopedType {
 }
 const urlMap = new Map()
 const codeMap = new Map()
+
+// Expose cache invalidation helpers so the extension can clear cached parse
+// results when files change in the workspace.
+export function invalidateCacheByUrl(url: string) {
+  try {
+    const code = urlMap.get(url)
+    if (code)
+      codeMap.delete(code)
+    urlMap.delete(url)
+  }
+  catch (e) {
+    // noop
+  }
+}
+
+export function clearAllCache() {
+  urlMap.clear()
+  codeMap.clear()
+}
 
 export async function getModule(url: string, onlyExports = false, moduleFolder?: string, currentUrl?: string) {
   const urlInfo = await toAbsoluteUrl(url, moduleFolder, currentUrl)!
@@ -487,7 +507,7 @@ export async function getModule(url: string, onlyExports = false, moduleFolder?:
       }
     }
     catch (error) {
-      // debugger
+      debug('parse node error', (error && (error as any).message) || error)
     }
   }
   exports = await Promise.all(exports.map(async (item) => {

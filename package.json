@@ -29,6 +29,17 @@
   "activationEvents": [
     "onStartupFinished"
   ],
+  "contributes": {
+    "configuration": {
+      "properties": {
+        "export-what.debug": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable debug logging for the export-what extension"
+        }
+      }
+    }
+  },
   "scripts": {
     "dev": "pnpm build --watch",
     "test": "vitest",
