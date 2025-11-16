@@ -1,6 +1,6 @@
 import type { Position } from 'vscode'
 import { existsSync, promises, readFileSync, statSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { resolve, isAbsolute } from 'node:path'
 import { getActiveText, getActiveTextEditor, getActiveTextEditorLanguageId, getCurrentFileUrl, getLineText, isInPosition } from '@vscode-use/utils'
 import fg from 'fast-glob'
 import { findUp } from 'find-up'
@@ -63,48 +63,65 @@ export function toPnpmUrl(url: string) {
 }
 
 // todo: 判断是否是pnpm通过pnpm 组合命名xx+xx去找目录下的类型
+const toAbsoluteUrlCache = new Map<string, { url: string; moduleFolder?: string } | undefined>()
+
+export function clearToAbsoluteUrlCache() {
+  toAbsoluteUrlCache.clear()
+}
+
 export async function toAbsoluteUrl(url: string, module = '', currentFileUrl = getCurrentFileUrl()!) {
-  // 判断是否是node_modules or 相对路径
-  if (LOCAL_URL_REG.test(url)) {
-    let isUseAlia = false
+  const cacheKey = `${module}::${url}::${currentFileUrl}`
+  if (toAbsoluteUrlCache.has(cacheKey))
+    return toAbsoluteUrlCache.get(cacheKey)
 
-    // ensure alias mapping is loaded lazily to avoid race conditions
-    const aliasMap = await ensureAlias()
-    if (aliasMap) {
-      Object.keys(aliasMap).forEach((alia) => {
-        url = url.replace(alia, () => {
-          isUseAlia = true
-          return aliasMap[alia]
+  try {
+    if (LOCAL_URL_REG.test(url)) {
+      let isUseAlia = false
+      const aliasMap = await ensureAlias()
+      if (aliasMap) {
+        Object.keys(aliasMap).forEach((alia) => {
+          url = url.replace(alia, () => {
+            isUseAlia = true
+            return aliasMap[alia]
+          })
         })
-      })
+      }
+      // If the url is already absolute, use it directly.
+      const result = isAbsolute(url) ? url : (isUseAlia ? resolve(_projectRoot, '.', url) : resolve(currentFileUrl, '..', url))
+
+      if (existsSync(result) && statSync(result).isFile()) {
+        const res = { url: result }
+        toAbsoluteUrlCache.set(cacheKey, res)
+        return res
+      }
+
+      for (const s of suffix) {
+        const _url = `${result}${s}`
+        if (existsSync(_url)) {
+          const res = { url: _url }
+          toAbsoluteUrlCache.set(cacheKey, res)
+          return res
+        }
+      }
+
+      for (const s of suffix) {
+        const child = resolve(result, `index${s}`)
+        if (existsSync(child)) {
+          const res = { url: child }
+          toAbsoluteUrlCache.set(cacheKey, res)
+          return res
+        }
+      }
+
+      toAbsoluteUrlCache.set(cacheKey, undefined)
+      return
     }
 
-    const result = isUseAlia
-      ? resolve(_projectRoot, '.', url)
-      : resolve(currentFileUrl, '..', url)
-
-    if (existsSync(result) && statSync(result).isFile())
-      return { url: result }
-
-    for (const s of suffix) {
-      const _url = `${result}${s}`
-      if (existsSync(_url))
-        return { url: _url }
-    }
-
-    for (const s of suffix) {
-      const child = resolve(result, `index${s}`)
-      if (existsSync(child))
-        return { url: child }
-    }
-  }
-  else {
     const moduleFolder = await findNodeModules(module, url)
-
     if (moduleFolder) {
       const _url = resolve(moduleFolder, '.', 'package.json')
       if (!existsSync(_url)) {
-        // todo: 修复没找到的文件
+        toAbsoluteUrlCache.set(cacheKey, undefined)
         return
       }
       const pkg = JSON.parse(readFileSync(_url, 'utf-8'))
@@ -122,37 +139,63 @@ export async function toAbsoluteUrl(url: string, module = '', currentFileUrl = g
           }
         }
         else if (existsSync(resolve(moduleFolder, `${moduleName}.d.ts`))) {
-          return { url: resolve(moduleFolder, `${moduleName}.d.ts`), moduleFolder }
+          const res = { url: resolve(moduleFolder, `${moduleName}.d.ts`), moduleFolder }
+          toAbsoluteUrlCache.set(cacheKey, res)
+          return res
         }
       }
       if (!main)
         main = pkg.types || pkg.typings || pkg.module || pkg.main || pkg?.exports?.types || pkg?.exports?.default
-      return { url: resolve(moduleFolder, '.', main), moduleFolder: resolve(moduleFolder, 'node_modules') }
+
+      const res = { url: resolve(moduleFolder, '.', main), moduleFolder: resolve(moduleFolder, 'node_modules') }
+      toAbsoluteUrlCache.set(cacheKey, res)
+      return res
     }
+
+    toAbsoluteUrlCache.set(cacheKey, undefined)
+    return
+  }
+  catch (e) {
+    toAbsoluteUrlCache.set(cacheKey, undefined)
+    return
   }
 }
-
+ 
 const workspaceCache = new Set()
+const findNodeModulesCache = new Map<string, string>()
 function isTarget(moduleFolder: string) {
   return isDirectory(moduleFolder) && existsSync(resolve(moduleFolder, './package.json'))
 }
 export async function findNodeModules(module: string, url: string, projectRoot = _projectRoot) {
+  const cacheKey = `${projectRoot}::${module}::${url}`
+  if (findNodeModulesCache.has(cacheKey))
+    return findNodeModulesCache.get(cacheKey)!
+
   let moduleFolder = ''
   if (module)
     moduleFolder = resolve(module, '.', url)
 
   if (isTarget(moduleFolder))
-    return moduleFolder
+    {
+      findNodeModulesCache.set(cacheKey, moduleFolder)
+      return moduleFolder
+    }
 
   moduleFolder = resolve(resolve(projectRoot, '.', 'node_modules'), '.', url)
 
   if (isTarget(moduleFolder))
-    return moduleFolder
+    {
+      findNodeModulesCache.set(cacheKey, moduleFolder)
+      return moduleFolder
+    }
   moduleFolder = toPnpmUrl(url) || moduleFolder
 
   // 从@types中获取
   if (isTarget(moduleFolder))
-    return moduleFolder
+    {
+      findNodeModulesCache.set(cacheKey, moduleFolder)
+      return moduleFolder
+    }
   moduleFolder = resolve(resolve(projectRoot, '.', 'node_modules/@types'), '.', url)
 
   if (!isTarget(moduleFolder)) {
@@ -171,7 +214,10 @@ export async function findNodeModules(module: string, url: string, projectRoot =
       if (!isDirectory(moduleFolder) && url.includes('/'))
         moduleFolder = await findNodeModules(module, url.split('/').slice(0, -1).join('/'), workspace)
       else
-        return moduleFolder
+        {
+          findNodeModulesCache.set(cacheKey, moduleFolder)
+          return moduleFolder
+        }
     }
   }
 
@@ -180,7 +226,12 @@ export async function findNodeModules(module: string, url: string, projectRoot =
     moduleFolder = await findNodeModules(module, url.split('/').slice(0, -1).join('/'))
   }
 
+  findNodeModulesCache.set(cacheKey, moduleFolder)
   return moduleFolder
+}
+
+export function clearFindNodeModulesCache() {
+  findNodeModulesCache.clear()
 }
 
 export function findFile(url: string) {

@@ -26,7 +26,7 @@ import {
   isVariableDeclaration,
   isVariableDeclarator,
 } from '@babel/types'
-import { toAbsoluteUrl } from './utils'
+import { toAbsoluteUrl, clearFindNodeModulesCache, clearToAbsoluteUrlCache } from './utils'
 import { debug } from './logger'
 
 export function parser(code: string) {
@@ -69,16 +69,16 @@ interface ScopedType {
   type: string
   raw?: string
 }
-const urlMap = new Map()
-const codeMap = new Map()
+const urlMap = new Map<string, { code: string; mtime: number }>()
+const codeMap = new Map<string, any>()
 
 // Expose cache invalidation helpers so the extension can clear cached parse
 // results when files change in the workspace.
 export function invalidateCacheByUrl(url: string) {
   try {
-    const code = urlMap.get(url)
-    if (code)
-      codeMap.delete(code)
+    const entry = urlMap.get(url)
+    if (entry)
+      codeMap.delete(entry.code)
     urlMap.delete(url)
   }
   catch (e) {
@@ -89,24 +89,37 @@ export function invalidateCacheByUrl(url: string) {
 export function clearAllCache() {
   urlMap.clear()
   codeMap.clear()
+  try {
+    clearFindNodeModulesCache()
+    clearToAbsoluteUrlCache()
+  }
+  catch (e) {
+    // noop
+  }
 }
 
 export async function getModule(url: string, onlyExports = false, moduleFolder?: string, currentUrl?: string) {
   const urlInfo = await toAbsoluteUrl(url, moduleFolder, currentUrl)!
   if (!urlInfo)
     return
-  const { url: _url, moduleFolder: _moduleFolder } = urlInfo
+  const _url = urlInfo.url
+  const _moduleFolder = (urlInfo as any).moduleFolder
   url = _url
   if (!existsSync(url))
     return
-  const code = fs.readFileSync(url, 'utf-8')
+  // Use file mtime to avoid reading file contents when unchanged.
+  // This prevents unnecessary I/O and parsing for cached files.
+  const stats = fs.statSync(url)
+  const mtime = stats.mtimeMs
   if (urlMap.has(url)) {
-    const originCode = urlMap.get(url)
-    if (originCode === code)
-      return codeMap.get(originCode)
-    codeMap.delete(originCode)
+    const entry = urlMap.get(url)!
+    if (entry.mtime === mtime)
+      return codeMap.get(entry.code)
+    // previous code changed, remove old code-based cache
+    codeMap.delete(entry.code)
   }
-  urlMap.set(url, code)
+  const code = fs.readFileSync(url, 'utf-8')
+  urlMap.set(url, { code, mtime })
 
   const imports: ImportType[] = []
   let exports: ExportType[] = []

@@ -43,7 +43,7 @@
   "scripts": {
     "dev": "pnpm build --watch",
     "test": "vitest",
-    "build": "tsup src/index.ts --external vscode",
+    "build": "tsdown src/index.ts --external vscode",
     "pack": "vsce package --no-dependencies",
     "lint": "eslint . --cache",
     "lint:fix": "pnpm lint --fix",
@@ -52,20 +52,20 @@
     "release": "bumpp && pnpm run publish"
   },
   "devDependencies": {
-    "@antfu/eslint-config": "^4.14.1",
-    "@babel/parser": "^7.27.5",
-    "@babel/types": "^7.27.6",
-    "@types/node": "^18.19.111",
+    "@antfu/eslint-config": "^4.19.0",
+    "@babel/parser": "^7.28.5",
+    "@babel/types": "^7.28.5",
+    "@types/node": "^18.19.130",
     "@types/vscode": "1.77.0",
     "@vscode-use/utils": "0.1.39",
-    "@vscode/vsce": "^3.5.0",
+    "@vscode/vsce": "^3.7.0",
     "bumpp": "^9.11.1",
-    "eslint": "^9.28.0",
+    "eslint": "^9.39.1",
     "fast-glob": "^3.3.3",
     "find-up": "^7.0.0",
-    "lazy-js-utils": "^0.1.44",
-    "tsup": "^6.7.0",
-    "typescript": "^5.8.3",
+    "lazy-js-utils": "^0.1.49",
+    "tsdown": "^0.16.4",
+    "typescript": "^5.9.3",
     "vitest": "^0.29.8"
   }
 }
