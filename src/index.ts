@@ -2,10 +2,9 @@ import type { ExportType } from './parse'
 import { createCompletionItem, createExtension, createHover, createMarkdownString, createRange, getSelection, registerCompletionItemProvider, registerHoverProvider } from '@vscode-use/utils'
 import { hash, isArray, toArray, uniqueArray } from 'lazy-js-utils'
 import * as vscode from 'vscode'
-import { getModule } from './parse'
 import { setEnabled as setLoggerEnabled } from './logger'
+import { getModule, invalidateCacheByUrl } from './parse'
 import { getImportSource } from './utils'
-import { invalidateCacheByUrl } from './parse'
 
 export = createExtension(() => {
   const filter = ['javascript', 'javascriptreact', 'typescript', 'typescriptreact', 'vue', 'svelte']
@@ -57,9 +56,9 @@ export = createExtension(() => {
 
     // file system watcher for create/change/delete to be thorough
     const watcher = vscode.workspace.createFileSystemWatcher('**/*.{ts,js,tsx,jsx,json}')
-    watcher.onDidChange((uri) => invalidateCacheByUrl(uri.fsPath))
-    watcher.onDidCreate((uri) => invalidateCacheByUrl(uri.fsPath))
-    watcher.onDidDelete((uri) => invalidateCacheByUrl(uri.fsPath))
+    watcher.onDidChange(uri => invalidateCacheByUrl(uri.fsPath))
+    watcher.onDidCreate(uri => invalidateCacheByUrl(uri.fsPath))
+    watcher.onDidDelete(uri => invalidateCacheByUrl(uri.fsPath))
   }
   catch (e) {
     // ignore in non-vscode contexts

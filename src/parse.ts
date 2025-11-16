@@ -1,5 +1,5 @@
 import type { ParserOptions } from '@babel/parser'
-import fs, { existsSync } from 'node:fs'
+import { promises as fsp } from 'node:fs'
 import { parse } from '@babel/parser'
 import {
   isArrowFunctionExpression,
@@ -26,8 +26,8 @@ import {
   isVariableDeclaration,
   isVariableDeclarator,
 } from '@babel/types'
-import { toAbsoluteUrl, clearFindNodeModulesCache, clearToAbsoluteUrlCache } from './utils'
 import { debug } from './logger'
+import { clearFindNodeModulesCache, clearToAbsoluteUrlCache, toAbsoluteUrl } from './utils'
 
 export function parser(code: string) {
   const finalOptions: ParserOptions = {
@@ -69,7 +69,7 @@ interface ScopedType {
   type: string
   raw?: string
 }
-const urlMap = new Map<string, { code: string; mtime: number }>()
+const urlMap = new Map<string, { code: string, mtime: number }>()
 const codeMap = new Map<string, any>()
 
 // Expose cache invalidation helpers so the extension can clear cached parse
@@ -102,30 +102,33 @@ export async function getModule(url: string, onlyExports = false, moduleFolder?:
   const urlInfo = await toAbsoluteUrl(url, moduleFolder, currentUrl)!
   if (!urlInfo)
     return
-  const _url = urlInfo.url
-  const _moduleFolder = (urlInfo as any).moduleFolder
-  url = _url
-  if (!existsSync(url))
+  const resolvedUrl = urlInfo.url
+  const resolvedModuleFolder = (urlInfo as any).moduleFolder
+  try {
+    await fsp.access(resolvedUrl)
+  }
+  catch {
     return
+  }
   // Use file mtime to avoid reading file contents when unchanged.
   // This prevents unnecessary I/O and parsing for cached files.
-  const stats = fs.statSync(url)
+  const stats = await fsp.stat(resolvedUrl)
   const mtime = stats.mtimeMs
-  if (urlMap.has(url)) {
-    const entry = urlMap.get(url)!
+  if (urlMap.has(resolvedUrl)) {
+    const entry = urlMap.get(resolvedUrl)!
     if (entry.mtime === mtime)
       return codeMap.get(entry.code)
     // previous code changed, remove old code-based cache
     codeMap.delete(entry.code)
   }
-  const code = fs.readFileSync(url, 'utf-8')
-  urlMap.set(url, { code, mtime })
+  const code = await fsp.readFile(resolvedUrl, 'utf-8')
+  urlMap.set(resolvedUrl, { code, mtime })
 
   const imports: ImportType[] = []
   let exports: ExportType[] = []
   const scoped: ScopedType[] = []
 
-  if (url.endsWith('.json')) {
+  if (resolvedUrl.endsWith('.json')) {
     // 对于json文件不用再解析了
     const json = JSON.parse(code)
     Object.keys(json).forEach((k) => {
@@ -143,7 +146,6 @@ export async function getModule(url: string, onlyExports = false, moduleFolder?:
       scoped,
     }
     codeMap.set(code, result)
-
     return result
   }
 
@@ -394,7 +396,7 @@ export async function getModule(url: string, onlyExports = false, moduleFolder?:
         }
       }
       else if (isExportAllDeclaration(node)) {
-        const _exports = (await getModule(node.source.value, false, _moduleFolder, url))!.exports
+        const _exports = (await getModule(node.source.value, false, resolvedModuleFolder, resolvedUrl))!.exports
         if (_exports)
           exports.push(..._exports)
       }
@@ -523,43 +525,46 @@ export async function getModule(url: string, onlyExports = false, moduleFolder?:
       debug('parse node error', (error && (error as any).message) || error)
     }
   }
-  exports = await Promise.all(exports.map(async (item) => {
-    const result = await findTarget(scoped, imports, item.name, moduleFolder, url) || item
+  // Helper to resolve export details from scoped and imports arrays
+  async function findTarget(scoped: ScopedType[], imports: ImportType[], name: string, moduleFolder?: string, currentUrl?: string): Promise<ExportType | undefined> {
+    // Try to find in scoped
+    const scopedItem = scoped.find(i => i.name === name)
+    if (scopedItem) {
+      return {
+        name: scopedItem.name,
+        alias: scopedItem.alias,
+        params: scopedItem.params,
+        returnType: scopedItem.returnType,
+        type: [scopedItem.type],
+        optionsTypes: scopedItem.optionsTypes,
+        raw: scopedItem.raw,
+      }
+    }
+    // Try to resolve from imports recursively
+    const importItem = imports.find(i => i.name === name)
+    if (importItem && importItem.source) {
+      const mod = await getModule(importItem.source, true, moduleFolder, currentUrl)
+      if (mod && mod.exports) {
+        return mod.exports.find((e: ExportType) => e.name === name)
+      }
+    }
+    return undefined
+  }
 
-    if (item.alias) {
+  exports = await Promise.all(exports.map(async (item) => {
+    const result = await findTarget(scoped, imports, item.name, resolvedModuleFolder, resolvedUrl)
+    if (item.alias && result) {
       result.returnType = result.returnType?.replace(result.name, item.alias) || ''
       result.name = item.alias
+      return result
     }
-    return result
+    return result || item
   })) as ExportType[]
-
   const result = {
     exports,
     imports,
     scoped,
   }
-
   codeMap.set(code, result)
   return result
-}
-
-async function findTarget(scoped: ScopedType[], imports: ImportType[], name: string, moduleFolder?: string, currentUrl?: string) {
-  const target = scoped.find(s => s.name === name)
-  if (target && target.type !== 'Identifier')
-    return target
-
-  if (target)
-    return findTarget(scoped, imports, target.alias || target.name, moduleFolder, currentUrl)
-
-  const importTarget = imports.find(i => (i.alias || i.name) === name)
-  if (importTarget) {
-    const module = await getModule(importTarget.source, false, moduleFolder, currentUrl)
-    if (!module)
-      return target
-    const { exports } = module
-    const t = importTarget?.type === 'default'
-      ? exports.find((e: any) => e.type.includes('default'))
-      : exports.find((e: any) => (e.alias || e.name) === importTarget.name)
-    return t
-  }
 }

@@ -1,12 +1,13 @@
 import type { Position } from 'vscode'
 import { existsSync, promises, readFileSync, statSync } from 'node:fs'
-import { resolve, isAbsolute } from 'node:path'
+import { isAbsolute, resolve } from 'node:path'
+import process from 'node:process'
 import { getActiveText, getActiveTextEditor, getActiveTextEditorLanguageId, getCurrentFileUrl, getLineText, isInPosition } from '@vscode-use/utils'
 import fg from 'fast-glob'
 import { findUp } from 'find-up'
 import { isArray, useJSONParse } from 'lazy-js-utils'
-import { parser } from './parse'
 import { debug } from './logger'
+import { parser } from './parse'
 
 const LOCAL_URL_REG = /^(?:\.|\/|@\/)/
 
@@ -15,11 +16,13 @@ const LOCAL_URL_REG = /^(?:\.|\/|@\/)/
 // available.
 let _projectRoot: string
 try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const vscode = require('vscode') as any
-  _projectRoot = (vscode && vscode.workspace && vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length)
-    ? vscode.workspace.workspaceFolders[0].uri.fsPath
-    : process.cwd()
+  // Use dynamic import to avoid top-level require lint error
+  (async () => {
+    const vscode = await import('vscode') as any
+    _projectRoot = (vscode && vscode.workspace && vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length)
+      ? vscode.workspace.workspaceFolders[0].uri.fsPath
+      : process.cwd()
+  })()
 }
 catch (e) {
   _projectRoot = process.cwd()
@@ -63,7 +66,7 @@ export function toPnpmUrl(url: string) {
 }
 
 // todo: 判断是否是pnpm通过pnpm 组合命名xx+xx去找目录下的类型
-const toAbsoluteUrlCache = new Map<string, { url: string; moduleFolder?: string } | undefined>()
+const toAbsoluteUrlCache = new Map<string, { url: string, moduleFolder?: string } | undefined>()
 
 export function clearToAbsoluteUrlCache() {
   toAbsoluteUrlCache.clear()
@@ -153,14 +156,12 @@ export async function toAbsoluteUrl(url: string, module = '', currentFileUrl = g
     }
 
     toAbsoluteUrlCache.set(cacheKey, undefined)
-    return
   }
   catch (e) {
     toAbsoluteUrlCache.set(cacheKey, undefined)
-    return
   }
 }
- 
+
 const workspaceCache = new Set()
 const findNodeModulesCache = new Map<string, string>()
 function isTarget(moduleFolder: string) {
@@ -175,27 +176,24 @@ export async function findNodeModules(module: string, url: string, projectRoot =
   if (module)
     moduleFolder = resolve(module, '.', url)
 
-  if (isTarget(moduleFolder))
-    {
-      findNodeModulesCache.set(cacheKey, moduleFolder)
-      return moduleFolder
-    }
+  if (isTarget(moduleFolder)) {
+    findNodeModulesCache.set(cacheKey, moduleFolder)
+    return moduleFolder
+  }
 
   moduleFolder = resolve(resolve(projectRoot, '.', 'node_modules'), '.', url)
 
-  if (isTarget(moduleFolder))
-    {
-      findNodeModulesCache.set(cacheKey, moduleFolder)
-      return moduleFolder
-    }
+  if (isTarget(moduleFolder)) {
+    findNodeModulesCache.set(cacheKey, moduleFolder)
+    return moduleFolder
+  }
   moduleFolder = toPnpmUrl(url) || moduleFolder
 
   // 从@types中获取
-  if (isTarget(moduleFolder))
-    {
-      findNodeModulesCache.set(cacheKey, moduleFolder)
-      return moduleFolder
-    }
+  if (isTarget(moduleFolder)) {
+    findNodeModulesCache.set(cacheKey, moduleFolder)
+    return moduleFolder
+  }
   moduleFolder = resolve(resolve(projectRoot, '.', 'node_modules/@types'), '.', url)
 
   if (!isTarget(moduleFolder)) {
@@ -211,13 +209,13 @@ export async function findNodeModules(module: string, url: string, projectRoot =
       workspaceCache.add(_workspace)
       const workspace = resolve(_workspace, '..')
       moduleFolder = await findNodeModules(module, url, workspace)
-      if (!isDirectory(moduleFolder) && url.includes('/'))
+      if (!isDirectory(moduleFolder) && url.includes('/')) {
         moduleFolder = await findNodeModules(module, url.split('/').slice(0, -1).join('/'), workspace)
-      else
-        {
-          findNodeModulesCache.set(cacheKey, moduleFolder)
-          return moduleFolder
-        }
+      }
+      else {
+        findNodeModulesCache.set(cacheKey, moduleFolder)
+        return moduleFolder
+      }
     }
   }
 
